@@ -193,7 +193,7 @@
   // One calm card: a single plain-language message, the hidden text it found,
   // and a way to reveal it. Only real threats open it automatically.
 
-  const LOGO = '<svg viewBox="0 0 28 28" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="14" r="8.5" fill="none" stroke="#fff" stroke-width="1.6"/><circle cx="17.5" cy="14" r="8.5" fill="none" stroke="#3d7eff" stroke-width="1.6"/></svg>';
+  const LOGO = '<svg viewBox="0 0 28 28" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="14" r="8.5" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="17.5" cy="14" r="8.5" fill="none" stroke="#fff" stroke-width="1.5"/></svg>';
 
   // How the text was hidden, in plain words.
   function how(where) {
