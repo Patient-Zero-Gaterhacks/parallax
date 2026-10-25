@@ -9,15 +9,24 @@ function show(state, title, sub) {
   $("sub").textContent = sub;
 }
 
-function render(v, available) {
+// The page shows a quick offline verdict first; these say so until the server's answer replaces it.
+const QUICK = { pending: "Quick check · the full check is on the way.",
+                timeout: "Quick check (server didn't answer in time).",
+                offline: "Quick check (the Parallax server isn't running)." };
+
+function render(v, available, waiting = "scanning") {
   $("found").hidden = true;
-  if (!v) return show("paused", available ? "Scanning…" : "Can't scan this page",
-    available ? "Waiting for this page's scan. Reload the page if needed." : "Use file scanning for documents and PDFs.");
+  if (!v && waiting === "unreachable") return show("paused", "Refresh this page to scan it",
+    "This tab was open before Parallax started.");
+  if (!v) return show("paused", !available ? "Can't scan this page" : waiting === "slow" ? "Still checking…" : "Scanning…",
+    !available ? "Use file scanning for documents and PDFs."
+      : waiting === "slow" ? "The server is slow. The result will show here when it's ready." : "Waiting for this page's scan.");
   if (v.verdict === "paused") return show("paused", "Paused on this site", "Turn scanning back on below.");
+  const quick = QUICK[v.quick];
   if (v.verdict === "threat") show("threat", v.count > 1 ? `${v.count} hidden messages` : "Hidden message found",
-    "Suspicious hidden text an AI assistant could read.");
-  else if (v.verdict === "caution") show("caution", "Hidden text found", "Its purpose isn't clear. Review the findings.");
-  else show("", "No suspicious hidden text found", "This scan found no hidden text that needs review.");
+    quick || "Suspicious hidden text an AI assistant could read.");
+  else if (v.verdict === "caution") show("caution", "Hidden text found", quick || "Its purpose isn't clear. Review the findings.");
+  else show("", "No suspicious hidden text found", quick || "This scan found no hidden text that needs review.");
   if ((v.verdict === "threat" || v.verdict === "caution") && v.top) {
     $("found").hidden = false; $("quote").textContent = v.top; $("gemma").hidden = !v.gemma;
   }
@@ -73,17 +82,27 @@ $("server-form").onsubmit = async event => {
   const paused = (await chrome.storage.local.get("paused")).paused || [];
   $("toggle").checked = available && !paused.includes(host);
 
-  let v = null;
-  if (available) {
-    try { v = await chrome.tabs.sendMessage(tab.id, { type: "getState" }); } catch { /* Reload after installing. */ }
-    if (!v) v = (await chrome.storage.session.get("tab" + tab.id))["tab" + tab.id];
+  // Ask the page itself (it knows its own verdict; the stored one may belong to the previous page in this tab).
+  let v = null, reachable = true;
+  const ask = async () => {
+    try { v = await chrome.tabs.sendMessage(tab.id, { type: "getState" }); reachable = true; }
+    catch { reachable = false; }   // tab opened before the extension was (re)loaded
     if (paused.includes(host)) v = { verdict: "paused" };
-  }
-  render(v, available);
+  };
+  if (available) await ask();
+  render(v, available, reachable ? "scanning" : "unreachable");
+
+  // No verdict yet: keep asking, and after 15 s say the server is slow instead of "Scanning…" forever.
+  const opened = Date.now();
+  const poll = setInterval(async () => {
+    if (!available || v) return clearInterval(poll);
+    await ask();
+    render(v, true, !reachable ? "unreachable" : Date.now() - opened > 15000 ? "slow" : "scanning");
+  }, 1000);
 
   // Update while open after an asynchronous scan or pause/resume.
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (available && area === "session" && changes["tab" + tab.id]) render(changes["tab" + tab.id].newValue, true);
+    if (available && area === "session" && changes["tab" + tab.id]) { v = changes["tab" + tab.id].newValue; render(v, true); }
   });
   $("details").onclick = async () => {
     try {

@@ -24,7 +24,8 @@ import json
 import math
 import os
 import re
-from collections import Counter
+import threading
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,6 +62,29 @@ Hidden text:
 >>>"""
 
 
+class VoteCache:
+    """Remembers a slow detector's answers by text: pages rescan often and send the same hidden spans
+    again, which shouldn't cost another Gemma call. Errors aren't remembered, so they're retried."""
+
+    def __init__(self, size: int = 4096):
+        self.size, self.votes, self.lock = size, OrderedDict(), threading.Lock()
+
+    def get(self, text: str):
+        with self.lock:
+            vote = self.votes.get(text)
+            if vote is not None:
+                self.votes.move_to_end(text)
+            return vote
+
+    def put(self, text: str, vote: Vote) -> Vote:
+        if not str(vote.detail).startswith("error"):
+            with self.lock:
+                self.votes[text] = vote
+                if len(self.votes) > self.size:
+                    self.votes.popitem(last=False)
+        return vote
+
+
 class GemmaDetector:
     name = "gemma-4"
     second_pass = True   # slow: scan.py only asks it about spans the fast detectors reacted to
@@ -70,8 +94,12 @@ class GemmaDetector:
             from google import genai
             client = genai.Client()
         self.client, self.model = client, model
+        self.cache = VoteCache()
 
     def __call__(self, text: str) -> Vote:
+        return self.cache.get(text) or self.cache.put(text, self._ask(text))
+
+    def _ask(self, text: str) -> Vote:
         try:
             r = self.client.models.generate_content(
                 model=self.model, contents=GEMMA_CLASSIFY.format(text=text[:4000]))
@@ -199,6 +227,7 @@ class TransformerDetector:
             self.model = AutoModelForSequenceClassification.from_pretrained(path).to(self.dev).eval()
         if self._is_gemma(Path(path)):
             self.name = "gemma-finetuned"
+        self.cache = VoteCache()
 
     @staticmethod
     def _is_gemma(folder: Path) -> bool:
@@ -219,9 +248,12 @@ class TransformerDetector:
         return self.torch.softmax(logits, -1)[:, 1].max().item()
 
     def __call__(self, text: str) -> Vote:
+        cached = self.cache.get(text)
+        if cached:
+            return cached
         try:
             s = self.score(text)
-            return Vote(self.name, s >= self.SURE, f"model {s:.2f}", unsure=self.MAYBE <= s < self.SURE)
+            return self.cache.put(text, Vote(self.name, s >= self.SURE, f"model {s:.2f}", unsure=self.MAYBE <= s < self.SURE))
         except Exception as e:
             return Vote(self.name, False, f"error: {e}")
 

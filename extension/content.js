@@ -57,16 +57,85 @@
     catch (e) { return false; }
   };
 
-  let scanVersion = 0;
+  // Scanning never waits on the server: every scan shows the quick offline verdict at once, then the
+  // server's answer replaces it. Pages that change by themselves (feeds, Gmail, news) rescan often and
+  // a slow server (Gemma on a laptop) can take seconds, so server calls go one at a time per tab, extra
+  // rescans collapse into one follow-up call, and unchanged hidden text never goes back to the server.
+  let started = 0;                                     // version of the newest scan
+  let applied = { ver: 0, key: null, quick: false };   // what's on screen now
+  let serverJob = null, nextJob = null;                // the call in flight, and the one latest call after it
+  let sentKey = null, sentFindings = null;             // last hidden spans the server judged, and its answer
+  let failed = { key: null, at: 0 };                   // don't re-ask about spans the server just failed on
+  let lastUrl = location.href, lastMessage = null;
+  const RETRY_MS = 60000;
+
+  // Same hidden spans -> same key (FNV-1a over texts + reasons).
+  function spansKey(spans) {
+    let h = 0x811c9dc5;
+    const s = JSON.stringify(spans.map(x => [x.text, x.reasons]));
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return (h >>> 0).toString(36) + ":" + spans.length;
+  }
+
+  // Show one answer, unless a newer one is already showing. A server answer about the same spans as the
+  // quick verdict on screen is an upgrade, even if a newer scan of the same spans has started since.
+  function apply(ver, key, findings, spans, quick) {
+    const upgrade = key === applied.key && applied.quick && !quick;
+    if (ver < applied.ver && !upgrade) return;
+    applied = { ver: Math.max(ver, applied.ver), key, quick };
+    findings.forEach((f, i) => { f.el = spans[i] && spans[i].el; });
+    const threats = findings.filter(f => f.level === "threat");
+    const cautions = findings.filter(f => f.level === "caution");
+    lastGroups = merge(threats.concat(cautions));
+    lastVerdict = { verdict: threats.length ? "threat" : cautions.length ? "caution" : "clean",
+                    count: merge(threats).length, cautions: merge(cautions).length, hidden: findings.length,
+                    top: lastGroups[0] ? lastGroups[0].text.slice(0, 280) : "", gemma: lastGroups.some(byGemma),
+                    quick: quick || false,     // "pending" | "timeout" | "offline" while it's only the quick check
+                    page: location.href };
+    lastMessage = { type: "verdict", ...lastVerdict,
+                    items: threats.concat(cautions).map(f => ({ text: f.text.slice(0, 300), why: f.why, where: f.where })) };
+    chrome.runtime.sendMessage(lastMessage);
+    if (keyOf(threats, cautions) === dismissedKey) return;
+    render(threats, cautions);
+  }
+
+  function askServer(job) {
+    if (serverJob) {   // one call at a time: remember only the latest page state for afterwards
+      if (serverJob.key !== job.key) nextJob = job;
+      return;
+    }
+    serverJob = job;
+    (async () => {
+      let res = null;
+      try { res = await chrome.runtime.sendMessage({ type: "classify", payload: job.payload }); } catch (e) { /* worker gone */ }
+      serverJob = null;
+      if (res && res.findings) {
+        sentKey = job.key; sentFindings = res.findings;
+        apply(job.ver, job.key, res.findings.map(f => ({ ...f })), job.spans, false);
+      } else {
+        failed = { key: job.key, at: Date.now() };
+        apply(job.ver, job.key, localJudge(job.payload.spans, job.payload.visible, res && res.ml), job.spans,
+              res && res.timeout ? "timeout" : "offline");
+      }
+      const next = nextJob; nextJob = null;
+      if (next && next.key !== job.key) askServer(next);
+    })();
+  }
+
   async function scan() {
-    const version = ++scanVersion;
+    const ver = ++started;
+    if (location.href !== lastUrl) {   // SPA route change: drop the previous page's result
+      lastUrl = location.href; lastVerdict = null; lastGroups = []; lastMessage = null;
+      applied = { ver: applied.ver, key: null, quick: false };
+    }
     const paused = await isPaused();
-    if (version !== scanVersion) return;
+    if (ver !== started) return;
     if (paused) {
       document.querySelectorAll(".parallax-reveal").forEach(el => el.classList.remove("parallax-reveal"));
+      applied = { ver, key: null, quick: false };   // answers to earlier scans can't overwrite the pause
       lastVerdict = { verdict: "paused" }; lastGroups = []; lastKey = null;
       const root = document.getElementById("parallax-panel"); root && root.remove();
-      chrome.runtime.sendMessage({ type: "verdict", verdict: "paused", count: 0, hidden: 0, items: [] });
+      chrome.runtime.sendMessage(lastMessage = { type: "verdict", verdict: "paused", count: 0, hidden: 0, items: [] });
       return;
     }
     styleCache = new WeakMap();
@@ -79,25 +148,18 @@
     const known = [location.hostname, links, visible].join(" ");
     const payload = { spans: lastSpans.map(h => ({ text: h.text.slice(0, 2000), reasons: h.reasons })),
                       visible: known.slice(0, 40000), context: "web" };
-    let findings;
-    try {
-      const res = await chrome.runtime.sendMessage({ type: "classify", payload });
-      findings = res && res.findings ? res.findings : localJudge(payload.spans, payload.visible, res && res.ml);
-    } catch (e) {
-      findings = localJudge(payload.spans, payload.visible);
+    const key = spansKey(payload.spans);
+    if (key === sentKey) {   // hidden text unchanged (only visible text moved): reuse the server's answer
+      apply(ver, key, sentFindings.map(f => ({ ...f })), spans, false);
+      return;
     }
-    if (version !== scanVersion) return;
-    findings.forEach((f, i) => { f.el = spans[i] && spans[i].el; });
-    const threats = findings.filter(f => f.level === "threat");
-    const cautions = findings.filter(f => f.level === "caution");
-    lastGroups = merge(threats.concat(cautions));
-    lastVerdict = { verdict: threats.length ? "threat" : cautions.length ? "caution" : "clean",
-                    count: merge(threats).length, cautions: merge(cautions).length, hidden: findings.length,
-                    top: lastGroups[0] ? lastGroups[0].text.slice(0, 280) : "", gemma: lastGroups.some(byGemma) };
-    chrome.runtime.sendMessage({ type: "verdict", ...lastVerdict,
-                                 items: threats.concat(cautions).map(f => ({ text: f.text.slice(0, 300), why: f.why, where: f.where })) });
-    if (keyOf(threats, cautions) === dismissedKey) return;
-    render(threats, cautions);
+    if (key !== applied.key) {   // new hidden text: show the quick offline verdict right away
+      let ml = null;
+      try { ml = await chrome.runtime.sendMessage({ type: "ml", spans: payload.spans }); } catch (e) { /* worker gone */ }
+      apply(ver, key, localJudge(payload.spans, payload.visible, Array.isArray(ml) ? ml : null), spans, "pending");
+    }
+    if (key === failed.key && Date.now() - failed.at < RETRY_MS) return;   // keep the quick verdict for now
+    askServer({ ver, key, payload, spans });
   }
 
   // ---- Panel -------------------------------------------------------------
@@ -267,5 +329,11 @@
     if (muts.some(m => !isOurs(m))) rescan();
   }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   chrome.storage.onChanged.addListener(ch => { if (ch.paused) { lastKey = null; dismissedKey = null; scan(); } });
+  // SPA route changes: rescan soon (scan() clears the old page's result first).
+  const soon = () => { clearTimeout(timer); timer = setTimeout(scan, 200); };
+  addEventListener("hashchange", soon);
+  addEventListener("popstate", soon);
+  // Back/Forward can restore this page from cache: tell the badge again what this page has.
+  addEventListener("pageshow", e => { if (e.persisted && lastMessage) chrome.runtime.sendMessage(lastMessage); });
   scan();
 })();
