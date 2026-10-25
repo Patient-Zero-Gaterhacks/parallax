@@ -261,15 +261,19 @@ def remove_quietly(path: str):
         pass
 
 
-def scan_url(url: str, client=None, detectors=None) -> Report:
+def scan_url(url: str, client=None, detectors=None, safe: bool = False) -> Report:
+    """safe=True (public mode): only public http(s) targets, checked before connecting and on every
+    redirect, 5 MB per response (parallax/netsafe.py). Raises netsafe.UnsafeURL when refused."""
     import httpx
+    from . import netsafe
     from .gap.cloak import HUMAN_UA
     detectors = detectors or default_detectors()
     own = client is None
-    client = client or httpx.Client(follow_redirects=True, timeout=15)
+    client = client or (netsafe.client() if safe else httpx.Client(follow_redirects=True, timeout=15))
+    fetch = (lambda u, ua: netsafe.safe_get(client, u, {"User-Agent": ua})) if safe else None
     try:
-        html = client.get(url, headers={"User-Agent": HUMAN_UA}).text
-        cloak = check_url(url, client)
+        html = fetch(url, HUMAN_UA) if safe else client.get(url, headers={"User-Agent": HUMAN_UA}).text
+        cloak = check_url(url, client, fetch=fetch)
     finally:
         if own:
             client.close()

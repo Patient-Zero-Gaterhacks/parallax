@@ -59,14 +59,16 @@ def diff_pages(human_html: str, agent_html: str) -> dict:
             "cloaked": bool(only_agent or only_human), "instruction_score": score}
 
 
-def check_url(url: str, client: httpx.Client | None = None) -> dict:
-    own = client is None
-    client = client or httpx.Client(follow_redirects=True, timeout=15)
+def check_url(url: str, client: httpx.Client | None = None, fetch=None) -> dict:
+    """fetch(url, user_agent) -> html replaces the plain GET (public mode passes a checked fetch)."""
+    own = client is None and fetch is None
+    client = client or (httpx.Client(follow_redirects=True, timeout=15) if own else None)
+    fetch = fetch or (lambda u, ua: client.get(u, headers={"User-Agent": ua}).text)
     try:
-        human = client.get(url, headers={"User-Agent": HUMAN_UA}).text
+        human = fetch(url, HUMAN_UA)
         out = {}
         for name, ua in AGENT_UAS.items():
-            out[name] = diff_pages(human, client.get(url, headers={"User-Agent": ua}).text)
+            out[name] = diff_pages(human, fetch(url, ua))
         return {"url": url, "agents": out,
                 "cloaked_for": [n for n, r in out.items() if r["cloaked"]]}
     finally:

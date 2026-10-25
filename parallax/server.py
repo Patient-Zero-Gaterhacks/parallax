@@ -10,6 +10,11 @@
     GET  /demo                                           -> demo UI
     GET  /lab/...                                        -> attack test pages
     GET  /approve/{id}                                   -> approve an action the MCP gateway paused
+
+Public mode (PARALLAX_PUBLIC=1, for hosting; see scripts/serve_public.sh): URL scans only reach public
+internet addresses (parallax/netsafe.py), /approve and /gateway are off (they read ~/.parallax), request
+sizes are capped, each client IP is rate-limited, and CORS allows only the extension plus the origins in
+PARALLAX_ALLOWED_ORIGINS. Uploads are never kept and request bodies are never logged.
 """
 
 from __future__ import annotations
@@ -17,23 +22,78 @@ from __future__ import annotations
 import html
 import io
 import json
+import os
 import tempfile
+import threading
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import demo
+from . import demo, netsafe
 from .detect import default_detectors
 from .gap.html_gap import HiddenSpan
 from .mcp_gateway.core import Store
 from .scan import _judge, remove_quietly, scan_file, scan_html, scan_url
 
+PUBLIC = os.environ.get("PARALLAX_PUBLIC") == "1"
+MB = 1024 * 1024
+MAX_BODY = {"/scan/file": 20 * MB, "/scan/html": 2 * MB}
+PER_MINUTE = {"/classify": 60, "/scan/file": 10, "/scan/url": 10, "/scan/html": 30}
+CLOSED = ("/approve", "/gateway")   # read and write ~/.parallax: local use only
+
+_hits: dict = defaultdict(deque)
+_hits_lock = threading.Lock()
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")   # RunPod's proxy sits in front of us
+    return fwd.split(",")[0].strip() or (request.client.host if request.client else "?")
+
+
+def _allow(ip: str, path: str, per_minute: int) -> bool:
+    now = time.monotonic()
+    with _hits_lock:
+        if len(_hits) > 5000:   # forget idle clients
+            for k in [k for k, q in _hits.items() if not q or now - q[-1] > 60]:
+                del _hits[k]
+        q = _hits[(ip, path)]
+        while q and now - q[0] > 60:
+            q.popleft()
+        if len(q) >= per_minute:
+            return False
+        q.append(now)
+        return True
+
+
+async def _public_guard(request: Request, call_next):
+    path = request.url.path
+    if path.startswith(CLOSED):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    limit = MAX_BODY.get(path)
+    if limit and int(request.headers.get("content-length") or 0) > limit:
+        return JSONResponse({"error": f"That's too big: the hosted server accepts up to {limit // MB} MB."}, status_code=413)
+    per_minute = PER_MINUTE.get(path)
+    if per_minute and request.method == "POST" and not _allow(_client_ip(request), path, per_minute):
+        return JSONResponse({"error": "Too many requests from your address. Please wait a minute and try again."},
+                            status_code=429)
+    return await call_next(request)
+
+
 app = FastAPI(title="Parallax")
-app.add_middleware(CORSMiddleware, allow_origin_regex=r"(chrome-extension://.*|http://localhost:\d+|http://127\.0\.0\.1:\d+)",
-                   allow_methods=["*"], allow_headers=["*"])
+if PUBLIC:
+    allowed = [o.strip().rstrip("/") for o in os.environ.get("PARALLAX_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+    app.add_middleware(BaseHTTPMiddleware, dispatch=_public_guard)   # added first, so CORS wraps its errors too
+    app.add_middleware(CORSMiddleware, allow_origins=allowed, allow_origin_regex=r"chrome-extension://[a-p]{32}",
+                       allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
+else:
+    app.add_middleware(CORSMiddleware, allow_origin_regex=r"(chrome-extension://.*|http://localhost:\d+|http://127\.0\.0\.1:\d+)",
+                       allow_methods=["*"], allow_headers=["*"])
 STATIC = Path(__file__).parent / "static"
 DETECTORS = default_detectors()
 
@@ -65,24 +125,39 @@ class AssistantIn(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "detectors": [d.name for d in DETECTORS]}
+    return {"ok": True, "public": PUBLIC, "detectors": [d.name for d in DETECTORS]}
+
+
+def _too_big(n: int, path: str) -> None:   # bodies sent without a Content-Length header get here
+    if PUBLIC and n > MAX_BODY[path]:
+        raise HTTPException(413, f"That's too big: the hosted server accepts up to {MAX_BODY[path] // MB} MB.")
 
 
 @app.post("/scan/html")
 def scan_html_ep(body: HtmlIn):
+    _too_big(len(body.html.encode()), "/scan/html")
     return scan_html(body.html, DETECTORS).to_dict()
 
 
 @app.post("/scan/url")
 def scan_url_ep(body: UrlIn):
-    return scan_url(body.url, detectors=DETECTORS).to_dict()
+    if not PUBLIC:
+        return scan_url(body.url, detectors=DETECTORS).to_dict()
+    try:
+        return scan_url(body.url, detectors=DETECTORS, safe=True).to_dict()
+    except netsafe.UnsafeURL as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:   # timeouts, TLS errors, bad responses: a plain message, no internals
+        return JSONResponse({"error": f"Couldn't fetch that page ({type(e).__name__})."}, status_code=502)
 
 
 @app.post("/scan/file")
 async def scan_file_ep(file: UploadFile = File(...)):
     suffix = Path(file.filename or "upload").suffix
+    data = await file.read()
+    _too_big(len(data), "/scan/file")
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-        f.write(await file.read())
+        f.write(data)
     try:
         rep = scan_file(f.name, DETECTORS)
     finally:
