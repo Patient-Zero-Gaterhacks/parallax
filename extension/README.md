@@ -1,70 +1,44 @@
-# Parallax extension redesign integration
+# Parallax for Chrome
 
-Adapted to upstream main at 47912f1535e36204bdf316c53c447e2bbfb12bfd.
+Parallax finds text hidden from you that an AI can read. Basic page scanning works offline. File scanning, AI-bot comparisons, and Gemma assessment need a reachable scanning server; Gemma assessment also needs a model configured on that server.
 
-## Install
+## Install and update
 
-Merge the included extension folder into the repository's extension folder.
-Keep the current backend and frontend folders. This package contains the complete
-extension, including the scan page, server helper, detector and model files.
+1. Download and extract the repository ZIP, or clone the repository.
+2. Open `chrome://extensions` and enable **Developer mode**.
+3. Click **Load unpacked** and select the repository's **`extension/`** folder, the one containing `manifest.json`. Do not select the ZIP or repository root.
+4. Click Chrome's puzzle-piece icon and pin **Parallax**.
+5. Refresh tabs that were open before installation, then open Parallax from the toolbar.
 
-In Chrome, open chrome://extensions, enable Developer mode, and choose Load
-unpacked, then select the extension folder. If already installed, click Reload.
-Reload web pages that were open before the extension update.
+To update, replace the files in the same folder (or pull the latest repository), click **Reload** on Parallax's card in `chrome://extensions`, and refresh your existing tabs.
 
-The built-in classifier works without the server. For file scans, bot-view
-comparisons and optional Gemma classification, start the existing backend from
-the repository root:
+## Server settings
+
+You do not need to run Python to try hosted features. With no saved address, Parallax checks the hosted server's `/health` for up to three seconds. If that check fails, it selects `http://localhost:8787`. It caches the selection for five minutes for hosted, or thirty seconds for local. Failed scan requests do not automatically switch servers.
+
+Open the popup's **Server settings**, enter an `http://` or `https://` address, and click **Save server** to use a particular backend. A saved address overrides automatic selection. The current hosted address is listed in the [root README](../README.md#try-it).
+
+Local setup is optional: follow the [root README](../README.md#getting-started) to install Python dependencies, then run from the repository root:
 
 ```sh
 uvicorn parallax.server:app --port 8787
 ```
 
-The popup's Server settings can point to a different HTTP or HTTPS backend.
-Files open in the dedicated scan tab so results persist after the popup closes.
-The existing 20 MB limit, document attachment results, open-PDF button and
-right-click file scanning remain available.
+Set **Server address** to `http://localhost:8787`. An optional repository-root `.env` is loaded at startup; explicit environment variables take precedence. Restart the backend after changing it. Local Gemma setup is described in the root README.
 
-## Integration choices
+## Scan pages and files
 
-- Imported the supplied dark popup, branded icons, compact threat pill and card.
-- Added per-site pause/resume, synchronized toolbar state and popup findings.
-- Preserved upstream carousel, same-site link and modern-color handling, the
-  offline classifier, current models and backend routes.
-- Preserved scan.html, scan.js and server.js; did not import the ZIP's older
-  detector or replace the backend or website frontend.
-- Grouped only fragments from the same element. The card lists every hidden
-  message with how it was hidden, including cautions alongside threats.
-- Discarded stale asynchronous scan responses after pause/resume or newer scans.
-- Gemma confirmation is shown only for a positive Gemma instruction vote.
+- Open a web page or Gmail message. Click a warning pill or open the popup to review findings. **Show on page** reveals hidden text; **Hide again** restores the page.
+- Use the popup's **Scan this site** switch to pause or resume scanning for the current hostname. Pausing one site does not pause other sites or manual file scans.
+- **Scan a file** opens a full tab where you can choose or drop a PDF, Word `.docx`, saved email `.eml`, or `.html`/`.htm` file (up to 20 MB). Results include hidden text, where it was hidden, why it matters, and email attachments. Use **Scan another file** to reset.
+- On an open PDF tab, choose **Scan this PDF**. You can also right-click a file link and choose **Scan this file with Parallax**.
+- AI-bot comparison checks whether a page serves AI agents different content. It needs the server even though basic page scanning works offline.
 
-## Validation
+## Troubleshooting
 
-Passed:
-- extension/test/detect.test.js (15 detector cases)
-- extension/test/ui.test.js (DOM integration: popup, alerts, all findings,
-  reveal, pause/resume, stale responses, false-alarm rules, file/PDF routing,
-  server settings, unsupported tabs and no active tab)
-- tests/test_extension_pipeline.py (extension detector to actual scanner API)
-- tests/test_server.py (including PDF and Word scans)
-- tests/test_second_pass.py (including mocked Gemma behavior)
-- tests/test_detect_env.py (with host proxy variables unset)
-- JavaScript syntax checks and git diff --check
-
-Run JS checks with jsdom installed in the test environment, for example:
-
-```sh
-cd extension
-npm install --no-save jsdom
-node test/detect.test.js
-node test/ui.test.js
-```
-
-Browser-based color and real-site fixture suites were not run: Chromium could
-not be downloaded in the build environment. The new interface has DOM-level
-coverage, but needs a manual Chrome smoke test for visual appearance and actual
-extension permissions. No live Gemma model was downloaded or evaluated.
-
-The package also includes extension-redesign.patch for applying this change
-against the upstream commit above. Apply that patch OR copy the extension
-folder; do not do both. No GitHub commits or pushes were made.
+- **No scan on an existing tab:** refresh it after installation or an extension reload. Check that scanning is enabled for that site. Chrome's internal pages are not scannable; use **Scan this PDF** for PDFs.
+- **Server unavailable or slow:** check the saved address in **Server settings** and visit its `/health` endpoint. Hosted service availability is required for hosted features. If you chose localhost, start your local backend. Basic page scanning continues offline.
+- **Local PDF cannot be fetched:** in `chrome://extensions` → Parallax → **Details**, enable **Allow access to file URLs**, or drag the file into the scan page.
+- **Download fails for a signed-in document:** open and save it in your browser, then upload the saved file.
+- **Unreadable document:** try another copy. Damaged or empty PDFs and malformed Word documents cannot be scanned; password-protected PDFs need an unlocked copy.
+- **File too large:** choose a file no larger than 20 MB. The hosted server also enforces request-size and rate limits.

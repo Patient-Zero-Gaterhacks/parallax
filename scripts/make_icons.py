@@ -1,4 +1,4 @@
-"""Draws the extension's toolbar icons: two overlapping white rings (the website logo,
+"""Draws the extension's toolbar icons: overlapping white/blue rings (the website logo,
 frontend/src/components/Logo.tsx) on a dark rounded square.
 
 Run from the repo root:  pip install pillow && python3 scripts/make_icons.py
@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 
 OUT = Path(__file__).resolve().parents[1] / "extension" / "icons"
 BG = (10, 10, 10, 255)          # #0a0a0a, same as the popup and card
-RING = (245, 245, 245, 255)     # #f5f5f5, white like the site's text color
+RING = (255, 255, 255, 255)     # #fff
 SCALE = 4                       # draw 4x bigger, then shrink: smooth edges even at 16px
 
 
@@ -23,8 +23,8 @@ def icon(size):
     # same ring thickness as before at large sizes, but never thinner than 1.3px in the final icon,
     # so the rings don't fade away at 16px
     width = round(max(0.0586 * size, 1.3) * SCALE)
-    for cx in (0.39 * big, 0.61 * big):   # the two centers are 0.84 radii apart, like the site logo (7 / 8.5)
-        d.ellipse((cx - r, big / 2 - r, cx + r, big / 2 + r), outline=RING, width=width)
+    for cx, color in ((0.39 * big, RING), (0.61 * big, (61, 126, 255, 255))):   # the two centers are 0.84 radii apart, like the site logo (7 / 8.5)
+        d.ellipse((cx - r, big / 2 - r, cx + r, big / 2 + r), outline=color, width=width)
     return img.resize((size, size), Image.LANCZOS)
 
 

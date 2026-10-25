@@ -18,7 +18,7 @@ const STEPS = [
     number: "03",
     title: "Load the extension",
     description:
-      'Click "Load unpacked" and select the extracted extension folder containing manifest.json.',
+      'Click "Load unpacked" and select the extension/ folder containing manifest.json, not the repository or ZIP folder.',
   },
   {
     number: "04",
@@ -30,7 +30,7 @@ const STEPS = [
     number: "05",
     title: "Start scanning",
     description:
-      "Open Parallax from your toolbar to check its connection and protection status. Once connected, you can start scanning supported content.",
+      "Refresh tabs that were already open, then open Parallax from your toolbar. Basic page scanning works offline; the hosted server enables the additional features.",
   },
 ];
 
@@ -160,18 +160,28 @@ export default function ComingSoon({
             </p>
 
             <h2 className="mb-4 text-2xl font-semibold tracking-[-0.02em]">
-              Running the local preview?
+              Hosted scanning, ready to try.
             </h2>
 
             <p className="max-w-[640px] leading-relaxed text-neutral-600">
-              This preview version uses a local scanning server.
-              Make sure the Parallax backend is running and connected
-              before testing its server-based detection features.
+              The extension uses the hosted scanning server by default. You do not need
+              to start Python to try it. Basic page scanning also works offline;
+              file scanning, AI-bot comparisons, and Gemma assessment need a reachable
+              server, with Gemma configured for assessment.
             </p>
 
-            <div className="mt-6 inline-block rounded-md bg-neutral-100 px-4 py-3 font-mono text-sm text-neutral-700">
-              http://127.0.0.1:8787/health
-            </div>
+            <p className="mt-4 max-w-[640px] leading-relaxed text-neutral-600">
+              With no saved address, Parallax checks the hosted server for up to three
+              seconds and selects localhost if that health check fails. A saved server
+              address overrides this selection. Failed scan requests do not automatically
+              switch servers.
+            </p>
+            <p className="mt-4 max-w-[640px] leading-relaxed text-neutral-600">
+              Local setup is optional: follow the repository README to run the backend,
+              then open the extension popup → Server settings, enter
+              http://localhost:8787, and choose Save server. You can use the same field
+              for another hosted backend.
+            </p>
           </div>
 
           {/* Back to home */}

@@ -229,6 +229,24 @@ def _document_data(doc) -> list[HiddenSpan]:
     return out
 
 
+def _trace_text(tr) -> str:
+    """A text run's characters, with a space wherever the next glyph starts a word-sized gap away.
+    Many PDFs (LaTeX, arXiv) position words instead of drawing space glyphs; without this their text
+    reads "Providedproperattributionisprovided"."""
+    size = tr.get("size") or 10
+    out, prev_x1 = [], None
+    for c in tr["chars"]:
+        x0, x1 = c[3][0], c[3][2]
+        # a gap of a fifth of the font size is a word break; jumping back left is a new line
+        jump = prev_x1 is not None and (x0 - prev_x1 > 0.2 * size or x0 < prev_x1 - 2 * size)
+        if jump and out and not out[-1].isspace() and chr(c[0]) != " ":
+            out.append(" ")
+        out.append(chr(c[0]))
+        # the right edge so far: a ligature ("fi") comes as a full-width "f" then a zero-width "i"
+        prev_x1 = x1 if prev_x1 is None or x0 < prev_x1 - 2 * size else max(prev_x1, x1)
+    return "".join(out)
+
+
 def analyze_pdf(path: str) -> dict:
     doc = pymupdf.open(path)
     full, off_layers = _all_layers_on(path, doc)
@@ -280,7 +298,7 @@ def analyze_pdf(path: str) -> dict:
                 # Scanned page: invisible OCR words over an image. Benign.
                 # TODO: check the words match the image (e.g. Gemma vision).
                 ocr_layer_words += len(text.split())
-                visible_parts.append(text)
+                visible_parts.append(_trace_text(tr).strip())
                 continue
             if invisible_mode:
                 reasons.append("invisible text render mode")
@@ -296,7 +314,7 @@ def analyze_pdf(path: str) -> dict:
                 origin_y = tr["chars"][0][2][1] if tr["chars"] else bbox[3]
                 pieces.append(((round(origin_y / 2), bbox[0], tr["seqno"]), payload, reasons))
             else:
-                visible_parts.append(text)
+                visible_parts.append(_trace_text(tr).strip())   # spaced: Gemma reads the visible text (scan.py)
         spans += _merge(pieces)
     spans += _document_data(doc)
     if full is not doc:

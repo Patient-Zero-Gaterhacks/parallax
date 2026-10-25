@@ -240,12 +240,18 @@ class TransformerDetector:
         except (OSError, ValueError):
             return False
 
+    def scores(self, texts: list[str], batch: int = 16) -> list[float]:
+        """One score per text, each read as a single chunk (callers cut long text with page_chunks)."""
+        out = []
+        for i in range(0, len(texts), batch):
+            e = self.tok(texts[i:i + batch], truncation=True, max_length=512, padding=True, return_tensors="pt").to(self.dev)
+            with self.torch.no_grad():
+                logits = self.model(input_ids=e["input_ids"], attention_mask=e["attention_mask"]).logits.float()
+            out += self.torch.softmax(logits, -1)[:, 1].tolist()
+        return out
+
     def score(self, text: str) -> float:
-        parts = page_chunks(text)
-        e = self.tok(parts, truncation=True, max_length=512, padding=True, return_tensors="pt").to(self.dev)
-        with self.torch.no_grad():
-            logits = self.model(input_ids=e["input_ids"], attention_mask=e["attention_mask"]).logits.float()
-        return self.torch.softmax(logits, -1)[:, 1].max().item()
+        return max(self.scores(page_chunks(text)))
 
     def __call__(self, text: str) -> Vote:
         cached = self.cache.get(text)

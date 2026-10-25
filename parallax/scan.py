@@ -7,6 +7,10 @@
     scan_url(url)        hidden text on the page + AI-targeted cloaking
     scan_file(path)      picks the right one from the file type
 
+When the fine-tuned Gemma is loaded, file and URL scans also have it read the VISIBLE text, cut up as in
+ml/official_test.py page mode (up to 8 chunks, flagged if any chunk >= 0.85), so the measured numbers apply:
+a document can be written to steer an AI in plain sight. Never on /classify (live pages in the extension).
+
 Verdicts:
     threat   hidden text that talks to an AI, adds facts you can't see
              (addresses, links, amounts, phone numbers), smuggles text in
@@ -23,10 +27,16 @@ import email.policy
 import os
 import re
 import tempfile
+import time
+import zipfile
+import zlib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .detect import default_detectors
+import pymupdf
+from lxml import etree
+
+from .detect import PatternDetector, default_detectors, page_chunks
 from .gap.cloak import check_url
 from .gap.docx_gap import analyze_docx
 from .gap.html_gap import MARKUP, _base, analyze_html
@@ -102,6 +112,7 @@ class Report:
     visible_text: str = ""
     ai_only_text: str = ""
     children: list = field(default_factory=list)   # attachments
+    visible_check_seconds: float | None = None      # Gemma reading the visible text; None when it didn't run
 
     def to_dict(self):
         return asdict(self)
@@ -211,32 +222,105 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
     return out
 
 
+VISIBLE_WHERE = "visible text written for an AI"
+VISIBLE_SURE = 0.85                    # the page rule in ml/official_test.py: any chunk >= 0.85
+VISIBLE_MAX_CHUNKS, VISIBLE_MAX_SENTENCES, VISIBLE_KEEP = 2, 40, 2
+VISIBLE_BUDGET = 15.0                  # seconds per file; past this, flagged chunks left are skipped
+_SENTENCE = re.compile(r"(?<=[.!?])\s+|(?<=[a-z0-9)][.!?])(?=[A-Z])|\n+")   # PDFs often run lines together: "2016.Note to"
+
+
+def _visible_pass(visible: str, detectors) -> tuple[list[Finding], float | None]:
+    """The fine-tuned model reads the visible text in page-mode chunks. For each flagged chunk (at most
+    VISIBLE_MAX_CHUNKS), its sentences are scored and the top 1-2 become findings: a caution when only
+    the model says so, a threat when the patterns flag that sentence too. Only second-pass detectors that
+    score chunks (TransformerDetector) take part; the zero-shot API models were never measured this way."""
+    models = [d for d in detectors if getattr(d, "second_pass", False) and hasattr(d, "scores")]
+    if not models or not visible.strip():
+        return [], None
+    t0, patterns, out = time.monotonic(), PatternDetector(), []
+    for d in models:
+        try:
+            chunks = page_chunks(visible)
+            hot = sorted(((s, c) for s, c in zip(d.scores(chunks), chunks) if s >= VISIBLE_SURE), reverse=True)
+            for chunk_score, chunk in hot[:VISIBLE_MAX_CHUNKS]:
+                if time.monotonic() - t0 > VISIBLE_BUDGET:
+                    break
+                sents = [x.strip() for x in _SENTENCE.split(chunk) if len(x.split()) >= 4][:VISIBLE_MAX_SENTENCES]
+                ranked = sorted(zip(d.scores(sents), sents), reverse=True) if sents else []
+                for rank, (s, sent) in enumerate(ranked[:VISIBLE_KEEP]):
+                    if rank and s < VISIBLE_SURE:
+                        break   # the second sentence only when it's a clear hit too
+                    pat = patterns(sent)
+                    out.append(Finding(sent, [VISIBLE_WHERE], "threat" if pat.flagged else "caution",
+                                       ["Gemma: visible text looks written to instruct an AI"]
+                                       + (["talks to an AI (patterns)"] if pat.flagged else []),
+                                       {d.name: {"flagged": True, "detail": f"chunk {chunk_score:.2f}, sentence {s:.2f}",
+                                                 "unsure": False},
+                                        pat.detector: {"flagged": pat.flagged, "detail": pat.detail, "unsure": False}}))
+        except Exception:   # a model error never breaks a scan; the hidden-text checks still stand
+            continue
+    return out, round(time.monotonic() - t0, 2)
+
+
 def _report(kind, result, detectors, extra_findings=(), web: bool = False) -> Report:
     findings = _judge(result["hidden"], result["visible_text"], detectors,
                       long_passage_caution=not web, web=web) + list(extra_findings)
+    seen, seconds = _visible_pass(result["visible_text"], detectors)
+    findings += seen
     levels = {f.level for f in findings}
     verdict = "threat" if "threat" in levels else "caution" if "caution" in levels else "clean"
-    n_threat = sum(f.level == "threat" for f in findings)
+    n_threat = sum(f.level == "threat" and VISIBLE_WHERE not in f.where for f in findings)
+    only_visible = all(VISIBLE_WHERE in f.where for f in findings if f.level == verdict)
     headline = {
-        "threat": f"{n_threat} hidden instruction{'s' if n_threat != 1 else ''} aimed at AI found",
-        "caution": "Contains text you can't see; purpose unclear",
+        "threat": "Visible text written to instruct an AI" if only_visible
+                  else f"{n_threat} hidden instruction{'s' if n_threat != 1 else ''} aimed at AI found",
+        "caution": "Visible text looks written to instruct an AI" if only_visible
+                   else "Contains text you can't see; purpose unclear",
         "clean": "Nothing hidden from you" if not findings
                  else f"Only harmless hidden text ({len(findings)} piece{'s' if len(findings) != 1 else ''}, e.g. preview lines)",
     }[verdict]
     return Report(kind, verdict, headline, findings, result["visible_text"],
-                  " ".join(f.text for f in findings if f.level != "info"))
+                  " ".join(f.text for f in findings if f.level != "info" and VISIBLE_WHERE not in f.where),
+                  visible_check_seconds=seconds)
 
 
 def scan_html(html: str, detectors=None) -> Report:
     return _report("email/html", analyze_html(html), detectors or default_detectors())
 
 
+class UnreadableDocument(ValueError):
+    """An expected document format error, safe to explain to the uploader."""
+
+
 def scan_pdf(path: str, detectors=None) -> Report:
-    return _report("pdf", analyze_pdf(path), detectors or default_detectors())
+    try:
+        with pymupdf.open(path) as doc:
+            if doc.needs_pass:
+                raise UnreadableDocument("This PDF is password-protected. Upload an unlocked copy.")
+            if not doc.page_count:
+                raise pymupdf.FileDataError("PDF has no pages")
+        result = analyze_pdf(path)
+    except pymupdf.FileDataError as exc:
+        raise UnreadableDocument("We couldn't read this PDF. It may be damaged or empty. Try another file.") from exc
+    return _report("pdf", result, detectors or default_detectors())
 
 
 def scan_docx(path: str, detectors=None) -> Report:
-    return _report("docx", analyze_docx(path), detectors or default_detectors())
+    try:
+        with zipfile.ZipFile(path) as archive:
+            # Catch missing ZIP members here, not arbitrary KeyErrors in the scanner.
+            try:
+                document = archive.read("word/document.xml")
+            except KeyError as exc:
+                raise zipfile.BadZipFile("Missing Word document") from exc
+            root = etree.fromstring(document)
+            word = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+            if root.tag != word + "document" or root.find(word + "body") is None:
+                raise zipfile.BadZipFile("Invalid Word document")
+        result = analyze_docx(path)
+    except (zipfile.BadZipFile, etree.XMLSyntaxError, zlib.error) as exc:
+        raise UnreadableDocument("We couldn't read this Word document. It may be damaged or empty. Try another .docx file.") from exc
+    return _report("docx", result, detectors or default_detectors())
 
 
 def scan_file(path: str, detectors=None) -> Report:
@@ -245,7 +329,7 @@ def scan_file(path: str, detectors=None) -> Report:
     suf = p.suffix.lower()
     if head.startswith(b"%PDF") or suf == ".pdf":
         return scan_pdf(path, detectors)
-    if head.startswith(b"PK") and suf in (".docx", ""):
+    if suf == ".docx" or (head.startswith(b"PK") and not suf):
         return scan_docx(path, detectors)
     if suf == ".eml":
         return scan_eml(p.read_bytes(), detectors)

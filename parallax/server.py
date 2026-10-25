@@ -40,7 +40,7 @@ from . import demo, netsafe
 from .detect import default_detectors
 from .gap.html_gap import HiddenSpan
 from .mcp_gateway.core import Store
-from .scan import _judge, remove_quietly, scan_file, scan_html, scan_url
+from .scan import UnreadableDocument, _judge, remove_quietly, scan_file, scan_html, scan_url
 
 PUBLIC = os.environ.get("PARALLAX_PUBLIC") == "1"
 MB = 1024 * 1024
@@ -161,6 +161,8 @@ async def scan_file_ep(file: UploadFile = File(...)):
         f.write(data)
     try:
         rep = scan_file(f.name, DETECTORS)
+    except UnreadableDocument as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
     finally:
         remove_quietly(f.name)
     rep.headline = f"{file.filename}: {rep.headline}"

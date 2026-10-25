@@ -148,7 +148,8 @@ pip install -r requirements-ml.txt
 PARALLAX_ML_TRANSFORMER=brandenxo/parallax-gemma uvicorn parallax.server:app --port 8787
 ```
 
-`GET /health` lists the detectors that are on.
+`GET /health` lists the detectors that are on. Optionally run `cp .env.example .env` and edit it before starting.
+The server and `python -m parallax.mcp_gateway` load the repository-root `.env` automatically, before configuration and detectors initialize. Explicit environment variables take precedence; restart after editing `.env`. The file is optional and ignored by Git.
 
 ### 2. Chrome extension
 
@@ -156,7 +157,7 @@ PARALLAX_ML_TRANSFORMER=brandenxo/parallax-gemma uvicorn parallax.server:app --p
 2. **Load unpacked** → pick the `extension/` folder. After pulling new code, click reload ↻ and refresh open tabs.
 3. Visit a lab page or open an email in Gmail. A red pill appears when hidden text is aimed at AI; click it for details and **Show on page**.
 4. **Scan a file** in the popup opens a scan page for PDFs, Word files and saved emails. On an open PDF, use **Scan this PDF**; right-click a file link for **Scan this file with Parallax**.
-5. The extension uses the hosted server by default and falls back to `http://localhost:8787`; set another one in the popup's **Settings**. Without any server, the page scan still works offline with the built-in model.
+5. No Python setup is needed to try the hosted features. With no saved server address, the extension checks the hosted server's health for up to 3 seconds and selects `http://localhost:8787` if that check fails. A saved address in **Server settings** overrides this selection; failed scan requests do not automatically switch servers. Basic page scanning works offline; file scans, AI-bot comparisons, and Gemma assessment need a reachable server (with Gemma configured for assessment). Local setup above is optional.
 
 ### 3. Website
 
