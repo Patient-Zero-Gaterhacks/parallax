@@ -4,14 +4,14 @@ const OPTIONS = [
     title: "Scans what you open.",
     text: "Checks the page you're on and every Gmail message you open, then shows what's hidden in a side panel. Right-click a PDF or Word link to scan the file. Our model runs inside the extension.",
     button: "Get the extension",
-    href: "/extension",
+    href: "#extension",
   },
   {
     label: "MCP PLUGIN",
     title: "Guards your assistant's tools.",
     text: "Sits between Claude Desktop or Cursor and your MCP servers. It strips hidden text from tool results, hides poisoned tools, and pauses risky actions until you approve them.",
     button: "Get the plugin",
-    href: "/plugin",
+    href: "#plugin",
   },
 ];
 
