@@ -18,7 +18,8 @@
   // emails, full links (http(s):// or www.) and phone numbers; amounts and bare domains ("openai.com") alone aren't strong evidence
   const FACT = /[\w.+-]+@[\w-]+(\.[\w-]+)+|https?:\/\/\S+|\bwww\.[^\s<>"')]+|(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g;
   const HOST = /(?<![\w@.-])(?:[a-z0-9-]+\.)+[a-z]{2,}(?![\w-])/g;
-  const siteOf = link => D.baseDomain(link.toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split(/[/?#:]/)[0]);
+  // "salon.com2020" (share text that lost its "/") counts as salon.com
+  const siteOf = link => D.baseDomain(link.toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split(/[/?#:]/)[0].replace(/(?<=[a-z])\d+$/, ""));
   // Same rules as the server's web mode (parallax/scan.py _judge web=True): red only on strong evidence.
   function localJudge(spans, visible, ml) {
     // sites the page already shows (its hostname, its links, visible text): a hidden link to one isn't new
@@ -30,17 +31,15 @@
       const comment = s.reasons.includes("HTML comment");
       // markup = alt/title/aria/data-* text, hidden fields, meta tags, JSON-LD: facts there alone are normal
       const markup = s.reasons.some(r => r.startsWith("markup:"));
-      const mismatch = s.reasons.some(r => r.startsWith("markup: link text shows"));
       const newFacts = (s.text.match(FACT) || []).filter(f => !visible.includes(f) && !sameSite(f));
       const strong = [], weak = [];
       if (LOCAL.test(s.text)) strong.push("talks to an AI (offline check)");
       if (s.reasons.includes("Unicode tag payload")) strong.push("text smuggled in invisible Unicode");
       // facts inside menus/carousels, comments (script/CDN links) or markup alone stay info
       if (newFacts.length && !ui && !comment && !markup) strong.push("adds hidden " + newFacts.slice(0, 3).join(", "));
-      if (mismatch) weak.push("link text shows one site but goes to another");
-      const label = markup && !mismatch && s.text.split(/\s+/).length < 12;   // short button/tooltip labels
-      if (m && m.level === "sure" && !label) weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
-      else if (m && m.level === "maybe" && !ui && !markup) weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
+      // a lookalike link alone, or the built-in model alone on markup text or a comment, stays info on web pages
+      if (m && m.level === "sure" && !markup && !comment) weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
+      else if (m && m.level === "maybe" && !ui && !markup && !comment) weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
       if (strong.length) return { text: s.text, where: s.reasons, level: "threat", why: strong.concat(weak) };
       if (weak.length) return { text: s.text, where: s.reasons, level: "caution", why: weak };
       return { text: s.text, where: s.reasons, level: "info", why: [] };

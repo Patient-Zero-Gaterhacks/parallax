@@ -58,8 +58,9 @@ _HOST = re.compile(r"(?<![\w@.-])(?:[a-z0-9-]+\.)+[a-z]{2,}(?![\w-])")
 
 def _site(link: str) -> str:
     """Registrable domain of a link or bare domain: https://www.npr.org/player/x -> npr.org."""
-    host = re.sub(r"^[a-z][a-z0-9+.-]*://", "", link.lower())
-    return _base(re.split(r"[/?#:]", host, 1)[0])
+    host = re.split(r"[/?#:]", re.sub(r"^[a-z][a-z0-9+.-]*://", "", link.lower()), 1)[0]
+    host = re.sub(r"(?<=[a-z])\d+$", "", host)   # "salon.com2020": share text that lost its "/" -> salon.com
+    return _base(host)
 
 
 def _full_link(link: str) -> bool:
@@ -95,11 +96,14 @@ FAST_MODELS = {"parallax-ml"}   # quick word-based models: on web pages they onl
 def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, web: bool = False) -> list[Finding]:
     """web=True (live pages): stricter about what counts as a threat, because real sites hide a lot of
     harmless UI text. Threat needs an instruction pattern, a stronger model (Gemma), invisible-Unicode
-    smuggling, or a hidden email/link/phone outside menus, tabs and dialogs. The fast model alone,
-    amounts alone, and facts inside collapsible UI or HTML comments raise a caution instead.
+    smuggling, or a hidden email/link/phone outside menus, tabs and dialogs. The fast model alone raises a
+    caution; amounts alone (prices, upsell boxes) and facts inside collapsible UI are info.
     Markup text (alt/title/aria/data-* attributes, hidden fields, meta tags, JSON-LD) is red only when a
-    detector other than the fast model flags it; links/phones/prices there alone are info. A link whose
-    text shows one site but goes to another is red in emails and files, a caution on live pages.
+    detector other than the fast model flags it; links/phones/prices there alone are info, and on live
+    pages so is a fast-model-only flag. A link whose visible text is one site's address but goes to another
+    is a caution in emails and files (red only with another strong signal) and info alone on live pages.
+    HTML comments: only facts -> info; only the fast model -> caution in emails/files, info on live pages;
+    patterns or Gemma -> threat.
     Second pass (Gemma) runs only on spans the first pass reacted to; it flagging always upgrades. It saying
     harmless clears a fast-model-only reaction: any such reaction on live pages, but in emails and files
     (web=False) only a "maybe", never a fast-model flag."""
@@ -118,6 +122,7 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
         new = {k: v - seen_facts[k] for k, v in facts(s.text).items()}
         if web:   # only full links count, and only to sites the page doesn't already show ("openai.com" alone is a logo name)
             new["link"] = {u for u in new["link"] if _full_link(u) and _site(u) not in seen_sites}
+            new.pop("amount", None)   # hidden prices and headline numbers are normal on web pages
         new = {k: v for k, v in new.items() if v}
         unicode = any("Unicode tag payload" in r for r in s.reasons)
         checks = [votes[d.name] for d in second if d.name in votes]
@@ -149,8 +154,10 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
         strong = bool(why)
         if markup and not mismatch and not unicode and not [n for n in flagged if n not in FAST_MODELS]:
             strong = False   # links/phones/prices or a fast-model guess in alt text or JSON-LD: never red alone
-        markup_label = markup and not mismatch and not unicode and len(s.text.split()) < 12 \
-            and flagged and all(n in FAST_MODELS for n in flagged)   # "Learn more about the assistant"
+        if mismatch and not (flagged or unicode):
+            strong = False   # a lookalike link alone is a caution in emails and files
+        markup_label = markup and not mismatch and not unicode and (web or len(s.text.split()) < 12) \
+            and flagged and all(n in FAST_MODELS for n in flagged)   # "Learn more about the assistant", meta descriptions
         if web and why:
             ui = any("collapsed UI" in r for r in s.reasons)
             strong_votes = [n for n in flagged if n not in FAST_MODELS]
@@ -162,9 +169,8 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
                 strong = False   # on live pages a lookalike link is a caution (redirect/tracking links are common)
         ui_facts_only = web and why and not flagged and any("collapsed UI" in r for r in s.reasons) \
             and not unicode
-        # web: comments listing script/CDN links are build leftovers, not a message
         ui_facts_only = ui_facts_only or (markup and not mismatch and why and not flagged and not unicode) \
-            or (web and markup_label) or (web and is_comment and why and not flagged and not unicode)
+            or (web and markup_label) or (web and mismatch and not flagged and not unicode)
         if why and strong:
             level = "threat"
         elif ui_facts_only:
@@ -177,14 +183,18 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
                        else "a long passage you can't see")
         else:
             level = "info"
+        if is_comment and not unicode and not [n for n in flagged if n not in FAST_MODELS]:
+            # comments listing script/CDN links or license notes are build leftovers, not a message
+            level = "caution" if flagged and not web else "info"
         out.append(Finding(s.text, s.reasons, level, why,
                            {n: {"flagged": v.flagged, "detail": v.detail, "unsure": getattr(v, "unsure", False)}
                             for n, v in votes.items()}))
     return out
 
 
-def _report(kind, result, detectors, extra_findings=()) -> Report:
-    findings = _judge(result["hidden"], result["visible_text"], detectors) + list(extra_findings)
+def _report(kind, result, detectors, extra_findings=(), web: bool = False) -> Report:
+    findings = _judge(result["hidden"], result["visible_text"], detectors,
+                      long_passage_caution=not web, web=web) + list(extra_findings)
     levels = {f.level for f in findings}
     verdict = "threat" if "threat" in levels else "caution" if "caution" in levels else "clean"
     n_threat = sum(f.level == "threat" for f in findings)
@@ -283,7 +293,7 @@ def scan_url(url: str, client=None, detectors=None, safe: bool = False) -> Repor
             extra.append(Finding(" ".join(d["only_agent"]), [f"served only to {agent}"], "threat",
                                  [f"page shows {agent} content people don't see"]))
             break  # one finding is enough; the same text usually goes to every agent
-    rep = _report("web page", analyze_html(html), detectors, extra)
+    rep = _report("web page", analyze_html(html), detectors, extra, web=True)   # a live page: web rules
     if cloak["cloaked_for"]:
         rep.headline = "This page shows AI agents different content: " + ", ".join(cloak["cloaked_for"])
     return rep

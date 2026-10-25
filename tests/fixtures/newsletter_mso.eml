@@ -1,0 +1,23 @@
+From: "Example News" <news@example-news.com>
+To: reader@example.org
+Subject: Your weekly digest
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+
+<!doctype html>
+<html>
+<head>
+<!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+<!--[if mso]><style type="text/css">body, table, td {font-family: Arial, sans-serif !important;}</style><![endif]-->
+</head>
+<body style="margin:0;background:#ffffff">
+<!--[if mso]><table role="presentation" width="600" align="center"><tr><td><![endif]-->
+<table role="presentation" width="100%"><tr><td style="font-family:Arial,sans-serif;color:#222">
+  <h1>This week at Example News</h1>
+  <p>Our top stories, picked by the editors. Read them at <a href="https://www.example-news.com/digest">example-news.com</a>.</p>
+  <!--[if mso]><a href="https://www.example-news.com/digest?utm_source=outlook" style="color:#1a73e8">Read in your browser at www.example-news.com</a><![endif]-->
+  <p>Questions? Reply to this email.</p>
+</td></tr></table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>

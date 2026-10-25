@@ -193,6 +193,34 @@
     else if (o && typeof o === "object") { for (const [k, v] of Object.entries(o)) yield* jsonStrings(v, k); }
   }
 
+  // Lookalike links: only when the visible link text is itself an address (same rules as html_gap.py).
+  const REDIRECTORS = new Set(["t.co", "l.facebook.com", "lm.facebook.com", "lnkd.in", "out.reddit.com", "web.archive.org",
+    "archive.org", "googleads.g.doubleclick.net", "paid.outbrain.com"]);
+  const redirector = (host, path) => { const h = host.toLowerCase().replace(/^www\./, "");
+    return REDIRECTORS.has(h) || (baseDomain(h) === "google.com" && path.startsWith("/url")); };
+  const imageHost = (host, path) => { const h = host.toLowerCase();
+    return /\.(jpe?g|png|gif|webp|svg|avif)$/i.test(path) || ["img", "images", "image", "i", "pbs", "media", "cdn", "static"].includes(h.split(".")[0])
+      || [".cloudfront.net", ".akamaized.net", ".twimg.com", ".fbcdn.net", ".googleusercontent.com", ".wp.com", "imgur.com", ".cdninstagram.com"].some(s => h.endsWith(s)); };
+  function shownDomain(a) {   // the domain a link visibly claims, if its text is just an address (<= 4 words, mostly the domain)
+    const parts = [];
+    const w = a.ownerDocument.createTreeWalker(a, 4 /* SHOW_TEXT */);
+    for (let n = w.nextNode(); n; n = w.nextNode()) if (!n.parentElement.closest("noscript, script, style")) parts.push(n.nodeValue.trim());
+    const text = parts.join(" ").trim();
+    if (!text || text.split(/\s+/).length > 4) return null;
+    const m = DOMAIN.exec(text.toLowerCase());
+    if (!m) return null;
+    const core = text.toLowerCase().replace(/^[\s<>()[\]"']+|[\s<>()[\]"']+$/g, "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    return m[1].length >= 0.6 * Math.max(1, core.length) && core.includes(m[1]) ? m[1] : null;
+  }
+
+  // Not a message: conditional comments (IE, Outlook's <!--[if mso]>) and commented-out code (same as html_gap.py).
+  function skipComment(t) {
+    if (t.startsWith("[if ") || t.includes("<![endif]")) return true;
+    if (/<(script|link|meta|style|div)\b/i.test(t)) return true;
+    const chars = t.replace(/\s/g, "");
+    return chars.length > 0 && (chars.match(/\p{L}/gu) || []).length / chars.length < 0.4;
+  }
+
   function markupSpans(doc, visible, limit = 80) {
     const seenVisible = norm(visible), seen = new Set(), out = [];
     const add = (text, reason, el) => {
@@ -233,10 +261,12 @@
       }
       if (tag === "a" && el.getAttribute("href")) {
         const href = el.getAttribute("href").trim();
-        let host = null;
-        if (/^https?:\/\//i.test(href)) { try { host = new URL(href).hostname; } catch (e) { host = null; } }
-        const shown = DOMAIN.exec((el.textContent || "").toLowerCase());
-        if (host && shown && baseDomain(shown[1]) !== baseDomain(host)) add(href, `link text shows ${shown[1]} but goes to ${host}`, el);
+        let u = null;
+        if (/^https?:\/\//i.test(href)) { try { u = new URL(href); } catch (e) { u = null; } }
+        const shown = shownDomain(el);
+        if (u && shown && baseDomain(shown) !== baseDomain(u.hostname) && !redirector(u.hostname, u.pathname)
+            && !imageHost(u.hostname, u.pathname) && !imageHost(shown, ""))
+          add(href, `link text shows ${shown} but goes to ${u.hostname}`, el);
       }
     }
     return out;
@@ -262,7 +292,7 @@
     const cw = doc.createTreeWalker(doc.body, 128 /* SHOW_COMMENT */);
     for (let n = cw.nextNode(); n; n = cw.nextNode()) {
       const t = n.nodeValue.trim();
-      if (t.length > 20) hidden.push({ text: t, reasons: ["HTML comment"], el: null });
+      if (t.length > 20 && !skipComment(t)) hidden.push({ text: t, reasons: ["HTML comment"], el: null });
     }
     for (const t of doc.querySelectorAll("template")) {        // never rendered, but in the HTML agents read
       const txt = (t.content ? t.content.textContent : t.textContent || "").replace(/\s+/g, " ").trim();

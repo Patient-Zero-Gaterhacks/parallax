@@ -229,7 +229,7 @@ def _drop_conditional_blocks(css: str) -> str:
     return "".join(out)
 
 
-def _stylesheet_rules(soup) -> list[tuple[str, dict]]:
+def _stylesheet_rules(soup) -> "_Rules":
     """Rules from <style> blocks. Selectors: tag, .class, #id, [attr], [attr=value] and
     combinations of them, joined by spaces or '>'. Pseudo-classes and sibling selectors
     are skipped (they need a browser); @media blocks are read as if they always apply."""
@@ -242,7 +242,74 @@ def _stylesheet_rules(soup) -> list[tuple[str, dict]]:
                 s = s.strip()
                 if s and not s.startswith("@"):
                     rules.append((s, _decls(body)))
-    return rules
+    return _Rules(rules)
+
+
+class _Rules(list):
+    """Stylesheet rules indexed by the last compound of each selector (its #id, else a .class, else the
+    tag), so an element only tries rules that could match it, plus a cache of computed styles per
+    element. Big news pages have thousands of rules and text nodes; without this, every rule was matched
+    against every ancestor of every text node (over a minute per page). Lives for one analyze_html call."""
+
+    def __init__(self, rules):
+        super().__init__(rules)
+        self.by_id, self.by_class, self.by_tag, self.rest, self.styles = {}, {}, {}, [], {}
+        self.needs, self.anc = {}, {}   # tokens a rule needs among an element's ancestors; tokens of those ancestors
+        for i, (sel, _) in enumerate(self):
+            if _browser_only(sel):
+                continue   # _matches never matches these
+            comps = [p for p in re.sub(r"\s*>\s*", " > ", sel).split() if p != ">"]
+            self.needs[i] = set().union(*[_tokens_of(c) for c in comps[:-1]]) if len(comps) > 1 else set()
+            m = _COMPOUND.match(comps[-1])
+            if not m:
+                continue
+            simple = re.sub(r"\[[^\]]*\]", "", m.group(2) or "")
+            ids, classes = re.findall(r"#([\w-]+)", simple), re.findall(r"\.([\w-]+)", simple)
+            tag = (m.group(1) or "").lower()
+            if ids:
+                self.by_id.setdefault(ids[0], []).append(i)
+            elif classes:
+                self.by_class.setdefault(classes[0], []).append(i)
+            elif tag and tag != "*":
+                self.by_tag.setdefault(tag, []).append(i)
+            else:
+                self.rest.append(i)
+
+    def candidates(self, el: Tag) -> list[int]:
+        idx = self.rest + self.by_tag.get(el.name, []) + self.by_id.get(el.get("id"), [])
+        for c in el.get("class") or []:
+            idx = idx + self.by_class.get(c, [])
+        idx = sorted(set(idx))   # keep source order: later rules win
+        if any(self.needs.get(i) for i in idx):   # ".menu p": skip unless some ancestor has class "menu"
+            have = self.ancestors(el)
+            idx = [i for i in idx if self.needs.get(i, set()) <= have]
+        return idx
+
+    def ancestors(self, el: Tag) -> frozenset:
+        """Tag names, .classes and #ids of all of el's ancestors (cached per element)."""
+        chain = []
+        node = el.parent
+        while isinstance(node, Tag) and node.name != "[document]" and id(node) not in self.anc:
+            chain.append(node)
+            node = node.parent
+        have = self.anc.get(id(node), frozenset()) if isinstance(node, Tag) else frozenset()
+        for node in reversed(chain):
+            have = have | _own_tokens(node)
+            self.anc[id(node)] = have
+        return have
+
+
+def _tokens_of(comp: str) -> set:   # what an element must have to match one compound selector
+    m = _COMPOUND.match(comp)
+    if not m:
+        return set()
+    simple = re.sub(r"\[[^\]]*\]", "", m.group(2) or "")
+    tag = (m.group(1) or "").lower()
+    return ({tag} if tag and tag != "*" else set()) | {k + n for k, n in re.findall(r"([.#])([\w-]+)", simple)}
+
+
+def _own_tokens(el: Tag) -> frozenset:
+    return frozenset([el.name] + ["." + c for c in el.get("class") or []] + (["#" + el["id"]] if el.get("id") else []))
 
 
 _COMPOUND = re.compile(r"^(\*|[a-z][\w-]*)?((?:[.#][\w-]+|\[[^\]]+\])*)$", re.I)
@@ -282,9 +349,13 @@ def _compound_matches(el: Tag, comp: str) -> bool:
     return True
 
 
+def _browser_only(sel: str) -> bool:   # pseudo-classes and sibling combinators need a browser
+    return ":" in sel.replace("::", ":") or "+" in sel or "~" in re.sub(r"\[[^\]]*\]", "", sel)
+
+
 def _matches(el: Tag, sel: str) -> bool:
-    if ":" in sel.replace("::", ":") or "+" in sel or "~" in re.sub(r"\[[^\]]*\]", "", sel):
-        return False     # pseudo-classes and sibling combinators need a browser
+    if _browser_only(sel):
+        return False
     parts = re.sub(r"\s*>\s*", " > ", sel).split()
     comps = [p for p in parts if p != ">"]
     if not comps or not _compound_matches(el, comps[-1]):
@@ -301,8 +372,11 @@ def _matches(el: Tag, sel: str) -> bool:
 
 
 def computed(el: Tag, rules) -> dict:
+    indexed = isinstance(rules, _Rules)
+    if indexed and id(el) in rules.styles:
+        return rules.styles[id(el)]
     style = {}
-    for sel, d in rules:
+    for sel, d in ([rules[i] for i in rules.candidates(el)] if indexed else rules):
         if _matches(el, sel):
             style.update(d)
     style.update(_decls(el.get("style", "")))
@@ -310,6 +384,8 @@ def computed(el: Tag, rules) -> dict:
         style.setdefault("background-color", el["bgcolor"])
     if el.name == "font" and el.get("color"):
         style.setdefault("color", el["color"])
+    if indexed:
+        rules.styles[id(el)] = style
     return style
 
 
@@ -456,6 +532,38 @@ def _jsonld_strings(obj, key=""):
             yield from _jsonld_strings(v, key)
 
 
+# Lookalike links: only when the visible link text is itself an address ("paypal.com", "https://x.com/y").
+REDIRECTORS = {"t.co", "l.facebook.com", "lm.facebook.com", "lnkd.in", "out.reddit.com", "web.archive.org",
+               "archive.org", "googleads.g.doubleclick.net", "paid.outbrain.com"}
+_IMAGE_EXT = re.compile(r"\.(jpe?g|png|gif|webp|svg|avif)$", re.I)
+
+
+def _redirector(host: str, path: str) -> bool:   # short links and redirect services show one site, go via another
+    h = host.lower().removeprefix("www.")
+    return h in REDIRECTORS or (_base(h) == "google.com" and path.startswith("/url"))
+
+
+def _image_host(host: str, path: str) -> bool:
+    h = host.lower()
+    return bool(_IMAGE_EXT.search(path)) or h.split(".")[0] in ("img", "images", "image", "i", "pbs", "media", "cdn", "static") \
+        or h.endswith((".cloudfront.net", ".akamaized.net", ".twimg.com", ".fbcdn.net", ".googleusercontent.com",
+                       ".wp.com", "imgur.com", ".cdninstagram.com"))
+
+
+def _shown_domain(a: Tag) -> str | None:
+    """The domain a link visibly claims, if its text is just an address: at most 4 words and mostly the domain.
+    Text inside <noscript>/<script>/<style> doesn't count (images carry no text, so they never claim one)."""
+    text = " ".join(s.strip() for s in a.find_all(string=True)
+                    if not isinstance(s, Comment) and not s.find_parent(("noscript", "script", "style"))).strip()
+    if not text or len(text.split()) > 4:
+        return None
+    m = _DOMAIN.search(text.lower())
+    if not m:
+        return None
+    core = re.sub(r"^https?://|/.*$", "", text.lower().strip(" <>()[]\"'"))
+    return m.group(1) if len(m.group(1)) >= 0.6 * max(1, len(core)) and m.group(1) in core else None
+
+
 def _markup_spans(soup, visible: str, limit: int = 80) -> list[HiddenSpan]:
     seen_visible = _norm(visible)
     out, seen = [], set()
@@ -499,13 +607,27 @@ def _markup_spans(soup, visible: str, limit: int = 80) -> list[HiddenSpan]:
                 add(el["content"], f"meta tag {name}")
         if el.name == "a" and el.get("href"):
             href = el["href"].strip()
-            host = urlparse(href).hostname if href.lower().startswith(("http://", "https://")) else None
-            shown = _DOMAIN.findall(el.get_text(" ", strip=True).lower())
-            if host and shown and _base(shown[0]) != _base(host):
-                add(href, f"link text shows {shown[0]} but goes to {host}")
+            shown = _shown_domain(el)
+            u = urlparse(href) if href.lower().startswith(("http://", "https://")) else None
+            host = u.hostname if u else None
+            if host and shown and _base(shown) != _base(host) and not _redirector(host, u.path) \
+                    and not _image_host(host, u.path) and not _image_host(shown, ""):
+                add(href, f"link text shows {shown} but goes to {host}")
         if len(out) >= limit:
             break
     return out
+
+
+def _skip_comment(c: str) -> bool:
+    """Not a message: conditional comments (IE's and Outlook's <!--[if mso]> in nearly every newsletter)
+    and commented-out code (tags, or under 40% letters)."""
+    t = c.strip()
+    if t.startswith("[if ") or "<![endif]" in t:
+        return True
+    if re.search(r"<(script|link|meta|style|div)\b", t, re.I):
+        return True
+    chars = re.sub(r"\s", "", t)
+    return bool(chars) and sum(ch.isalpha() for ch in chars) / len(chars) < 0.4
 
 
 def analyze_html(html: str) -> dict:
@@ -515,7 +637,7 @@ def analyze_html(html: str) -> dict:
     visible_parts: list[str] = []
 
     for c in soup.find_all(string=lambda s: isinstance(s, Comment)):
-        if c.strip():
+        if c.strip() and not _skip_comment(c):
             sc, hits = instruction_score(c)
             spans.append(HiddenSpan(c.strip(), ["HTML comment"], sc, hits))
     for node in soup.find_all(string=True):
