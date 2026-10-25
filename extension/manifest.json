@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Parallax - see what your AI sees",
+  "version": "0.1.0",
+  "description": "Finds text on pages, in Gmail and in PDF/Word files that AI assistants read but you can't see.",
+  "permissions": ["contextMenus", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["detect.js", "content.js"],
+    "css": ["content.css"],
+    "run_at": "document_idle"
+  }],
+  "action": { "default_popup": "popup.html", "default_title": "Parallax" }
+}

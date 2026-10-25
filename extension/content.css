@@ -1,0 +1,17 @@
+#parallax-panel {
+  position: fixed; right: 16px; bottom: 16px; z-index: 2147483647; width: 360px; max-height: 60vh; overflow: auto;
+  background: #fff; color: #1c1b19; border: 1px solid #e3e0da; border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.18); font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; padding: 12px;
+}
+#parallax-panel .px-head { font-weight: 700; padding: 6px 8px; border-radius: 8px; }
+#parallax-panel .px-threat { background: #fdecea; color: #b42318; }
+#parallax-panel .px-caution { background: #fff4dd; color: #9a6100; }
+#parallax-panel .px-sub { color: #6b6862; margin: 6px 2px 8px; font-size: 13px; }
+#parallax-panel .px-item { border-top: 1px solid #eee; padding: 8px 2px; }
+#parallax-panel .px-text { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; word-break: break-word; }
+#parallax-panel .px-why { color: #6b6862; font-size: 12px; margin-top: 4px; }
+#parallax-panel .px-btns { display: flex; gap: 8px; margin-top: 8px; }
+#parallax-panel button { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
+.parallax-reveal { display: block !important; visibility: visible !important; opacity: 1 !important;
+  color: #b42318 !important; background: #fdecea !important; font-size: 14px !important; position: static !important;
+  outline: 2px dashed #b42318 !important; max-height: none !important; overflow: visible !important; text-indent: 0 !important; }
