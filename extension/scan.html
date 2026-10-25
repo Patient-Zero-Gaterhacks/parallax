@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scan a file — Parallax</title>
+<style>
+  body { max-width: 760px; margin: 48px auto; padding: 0 20px; font: 16px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; color: #1c1b19; }
+  h1 { font-size: 24px; margin-bottom: 8px; }
+  h2 { font-size: 20px; } h3 { font-size: 17px; }
+  .v { padding: 12px; border-radius: 8px; margin-bottom: 10px; font-weight: 600; }
+  .threat { background: #fdecea; color: #b42318; } .caution { background: #fff4dd; color: #9a6100; } .clean { background: #e7f5ee; color: #1f7a4d; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
+  button:disabled { cursor: wait; opacity: .6; }
+  #drop { border: 2px dashed #aaa; border-radius: 12px; padding: 48px 20px; text-align: center; margin: 24px 0; }
+  #drop.dragging { border-color: #1f7a4d; background: #e7f5ee; }
+  #status { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .finding { padding: 16px 0; border-bottom: 1px solid #ddd; }
+  mark { background: #fff4dd; color: #1c1b19; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .finding p { margin: 8px 0 0; overflow-wrap: anywhere; }
+  .attachment { border-top: 2px solid #ddd; margin-top: 24px; padding-top: 8px; }
+  .hint { color: #6b6862; font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>Parallax · Scan a file</h1>
+  <p>See the hidden text an AI can read in your documents and saved emails.</p>
+  <div id="drop">
+    <p>Drag a file here</p>
+    <button id="choose" type="button">Choose file</button>
+    <input id="file" type="file" accept=".pdf,.docx,.eml,.html,.htm" hidden>
+    <p class="hint">PDF, Word (.docx), saved email (.eml), or HTML · Up to 20 MB</p>
+  </div>
+  <p id="status" role="status" aria-live="polite"></p>
+  <section id="results" aria-label="Scan results" hidden>
+    <div id="verdict" class="v"></div>
+    <h2 id="headline"></h2>
+    <div id="findings"></div>
+    <div id="attachments"></div>
+  </section>
+  <button id="reset" type="button" hidden>Scan another file</button>
+  <script src="server.js"></script>
+  <script src="scan.js"></script>
+</body>
+</html>

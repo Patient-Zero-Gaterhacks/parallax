@@ -7,19 +7,33 @@
   h1 { font-size: 16px; margin: 0 0 8px; }
   .v { padding: 8px; border-radius: 8px; margin-bottom: 10px; font-weight: 600; }
   .threat { background: #fdecea; color: #b42318; } .caution { background: #fff4dd; color: #9a6100; } .clean { background: #e7f5ee; color: #1f7a4d; }
-  button, label.file { display: block; width: 100%; text-align: left; font: inherit; padding: 8px 10px; margin: 6px 0;
+  button { display: block; width: 100%; text-align: left; font: inherit; padding: 8px 10px; margin: 6px 0;
     border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; box-sizing: border-box; }
   #out { font-size: 13px; color: #444; white-space: pre-wrap; margin-top: 8px; }
   small { color: #6b6862; }
+  [hidden] { display: none !important; }
+  #server-form { margin-top: 12px; font-size: 12px; }
+  .server-row { display: flex; gap: 6px; align-items: center; }
+  #server { min-width: 0; flex: 1; padding: 7px; border: 1px solid #ddd; border-radius: 8px; }
+  #save-server { width: auto; }
 </style>
 </head>
 <body>
   <h1>Parallax</h1>
   <div id="verdict" class="v clean">Checking this page…</div>
   <button id="cloak">Check if this page shows AI something different</button>
-  <label class="file">Scan a PDF, Word file or saved email…<input id="file" type="file" accept=".pdf,.docx,.eml,.html" hidden></label>
+  <button id="scan-file">Scan a PDF, Word file or saved email…</button>
+  <button id="scan-pdf" hidden>Scan this PDF</button>
   <div id="out"></div>
-  <small>Server: <span id="srv"></span></small>
+  <form id="server-form">
+    <label for="server">Server</label>
+    <div class="server-row">
+      <input id="server" type="text" placeholder="http://localhost:8787" spellcheck="false">
+      <button id="save-server" type="submit">Save</button>
+    </div>
+    <small id="server-status" role="status"></small>
+  </form>
+  <script src="server.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

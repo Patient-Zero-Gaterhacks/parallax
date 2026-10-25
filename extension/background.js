@@ -2,6 +2,7 @@
 // badge, and adds "Scan this file with Parallax" for PDF and Word links.
 
 importScripts("ml.js");   // our trained classifier, used when the server is off
+importScripts("server.js");
 
 let MODEL = null;
 async function model() {
@@ -9,15 +10,7 @@ async function model() {
   return MODEL;
 }
 
-const DEFAULT_SERVER = "http://localhost:8787";
-const server = async () => (await chrome.storage.local.get("server")).server || DEFAULT_SERVER;
-
-async function post(path, body, isForm = false) {
-  const res = await fetch((await server()) + path, isForm ? { method: "POST", body }
-    : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error(`server ${res.status}`);
-  return res.json();
-}
+const post = (path, body) => ParallaxServer.post(path, body);
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === "classify") {
@@ -37,13 +30,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     chrome.storage.session.set({ ["tab" + sender.tab.id]: msg });
   }
   if (msg.type === "scanUrl") {
-    post("/scan/url", { url: msg.url }).then(reply).catch(e => reply({ error: String(e) }));
-    return true;
-  }
-  if (msg.type === "scanUpload") {
-    const fd = new FormData();
-    fd.append("file", new Blob([new Uint8Array(msg.bytes)]), msg.name);
-    post("/scan/file", fd, true).then(reply).catch(e => reply({ error: String(e) }));
+    post("/scan/url", { url: msg.url }).then(reply).catch(e => reply({ error: e.message }));
     return true;
   }
 });
@@ -52,16 +39,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({ id: "px-scan-link", title: "Scan this file with Parallax", contexts: ["link"] });
 });
 
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+chrome.contextMenus.onClicked.addListener(async info => {
   if (info.menuItemId !== "px-scan-link") return;
-  try {
-    const blob = await (await fetch(info.linkUrl)).blob();
-    const name = decodeURIComponent(new URL(info.linkUrl).pathname.split("/").pop() || "file");
-    const fd = new FormData();
-    fd.append("file", blob, name);
-    const report = await post("/scan/file", fd, true);
-    chrome.tabs.sendMessage(tab.id, { type: "fileResult", report });
-  } catch (e) {
-    chrome.tabs.sendMessage(tab.id, { type: "fileResult", report: { headline: "Couldn't scan that file: " + e, findings: [] } });
-  }
+  await chrome.tabs.create({ url: chrome.runtime.getURL("scan.html") + "?url=" + encodeURIComponent(info.linkUrl) });
 });
