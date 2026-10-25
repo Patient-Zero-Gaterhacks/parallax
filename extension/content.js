@@ -1,6 +1,6 @@
 // Scans the page you're looking at (including an open Gmail message) for
-// text that AI assistants will read but you can't see, and shows a panel
-// when something is aimed at AI.
+// text that AI assistants will read but you can't see. Quiet by default: a small
+// corner pill appears only when hidden text is aimed at AI; anything less serious only sets the toolbar badge.
 
 (() => {
   const D = window.ParallaxDetect;
@@ -51,12 +51,30 @@
   let dismissedKey = null;   // findings the user dismissed; don't show them again
   const keyOf = (threats, cautions) => threats.concat(cautions).map(f => f.text).join("\n");
 
+  // Per-site pause, like an ad blocker's "off on this site" switch (set from the popup).
+  const isPaused = async () => {
+    try { return ((await chrome.storage.local.get("paused")).paused || []).includes(location.hostname); }
+    catch (e) { return false; }
+  };
+
+  let scanVersion = 0;
   async function scan() {
+    const version = ++scanVersion;
+    const paused = await isPaused();
+    if (version !== scanVersion) return;
+    if (paused) {
+      document.querySelectorAll(".parallax-reveal").forEach(el => el.classList.remove("parallax-reveal"));
+      lastVerdict = { verdict: "paused" }; lastGroups = []; lastKey = null;
+      const root = document.getElementById("parallax-panel"); root && root.remove();
+      chrome.runtime.sendMessage({ type: "verdict", verdict: "paused", count: 0, hidden: 0, items: [] });
+      return;
+    }
     styleCache = new WeakMap();
     const { hidden, visible } = D.scanDocument(document, env);
     // Collapse duplicates and keep the request small.
     const seen = new Set();
     lastSpans = hidden.filter(h => { const k = h.text.slice(0, 200); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 200);
+    const spans = lastSpans;
     const links = [...document.querySelectorAll("a[href]")].map(a => a.getAttribute("href").replace(/^(mailto|tel):/i, "")).join(" ");
     const known = [location.hostname, links, visible].join(" ");
     const payload = { spans: lastSpans.map(h => ({ text: h.text.slice(0, 2000), reasons: h.reasons })),
@@ -68,54 +86,170 @@
     } catch (e) {
       findings = localJudge(payload.spans, payload.visible);
     }
-    findings.forEach((f, i) => { f.el = lastSpans[i] && lastSpans[i].el; });
+    if (version !== scanVersion) return;
+    findings.forEach((f, i) => { f.el = spans[i] && spans[i].el; });
     const threats = findings.filter(f => f.level === "threat");
     const cautions = findings.filter(f => f.level === "caution");
-    chrome.runtime.sendMessage({ type: "verdict", verdict: threats.length ? "threat" : cautions.length ? "caution" : "clean",
-                                 count: threats.length, hidden: findings.length,
+    lastGroups = merge(threats.concat(cautions));
+    lastVerdict = { verdict: threats.length ? "threat" : cautions.length ? "caution" : "clean",
+                    count: merge(threats).length, cautions: merge(cautions).length, hidden: findings.length,
+                    top: lastGroups[0] ? lastGroups[0].text.slice(0, 280) : "", gemma: lastGroups.some(byGemma) };
+    chrome.runtime.sendMessage({ type: "verdict", ...lastVerdict,
                                  items: threats.concat(cautions).map(f => ({ text: f.text.slice(0, 300), why: f.why, where: f.where })) });
     if (keyOf(threats, cautions) === dismissedKey) return;
     render(threats, cautions);
   }
 
-  function render(threats, cautions) {
-    let panel = document.getElementById("parallax-panel");
-    if (!threats.length && !cautions.length) { panel && panel.remove(); return; }
-    if (!panel) { panel = document.createElement("div"); panel.id = "parallax-panel"; document.documentElement.appendChild(panel); }
-    const items = threats.concat(cautions).slice(0, 6);
-    panel.innerHTML = "";
-    const h = document.createElement("div");
-    h.className = "px-head " + (threats.length ? "px-threat" : "px-caution");
-    h.textContent = threats.length
-      ? `Parallax: ${threats.length} hidden instruction${threats.length > 1 ? "s" : ""} aimed at AI`
-      : "Parallax: text on this page is hidden from you";
-    panel.appendChild(h);
-    const sub = document.createElement("div");
-    sub.className = "px-sub";
-    sub.textContent = "An AI assistant reading this page would see this. You can't.";
-    panel.appendChild(sub);
-    for (const f of items) {
-      const it = document.createElement("div"); it.className = "px-item";
-      const t = document.createElement("div"); t.className = "px-text"; t.textContent = f.text.slice(0, 220);
-      const w = document.createElement("div"); w.className = "px-why"; w.textContent = (f.why || []).join("; ") + " · " + (f.where || []).join(", ");
-      it.append(t, w); panel.appendChild(it);
+  // ---- Panel -------------------------------------------------------------
+  // One calm card: a single plain-language message, the hidden text it found,
+  // and a way to reveal it. Only real threats open it automatically.
+
+  const LOGO = '<svg viewBox="0 0 28 28" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="14" r="8.5" fill="none" stroke="#fff" stroke-width="1.6"/><circle cx="17.5" cy="14" r="8.5" fill="none" stroke="#3d7eff" stroke-width="1.6"/></svg>';
+
+  // How the text was hidden, in plain words.
+  function how(where) {
+    const w = (where || []).join(" ");
+    if (/text color ~ background|transparent text/.test(w)) return "same color as the background";
+    if (/font-size/.test(w)) return "tiny text";
+    if (/off-screen/.test(w)) return "pushed off the screen";
+    if (/opacity/.test(w)) return "see-through text";
+    if (/clipped|zero-size/.test(w)) return "squeezed to nothing";
+    if (/covered by another/.test(w)) return "covered by something else";
+    if (/Unicode/.test(w)) return "invisible characters";
+    if (/HTML comment|markup:/.test(w)) return "inside the page code";
+    if (/display:none|visibility:hidden|hidden>/.test(w)) return "hidden on the page";
+    return "hidden from you";
+  }
+
+  // What the hidden text does, in plain words.
+  function what(why) {
+    const w = (why || []).join(" ");
+    if (/talks to an AI/.test(w)) return "Written for an AI assistant";
+    if (/invisible Unicode/.test(w)) return "Smuggled in invisible characters";
+    const fact = /hidden (email address|link|phone number|amount)/.exec(w) || (/adds hidden/.test(w) && [0, "link or address"]);
+    if (fact) return `Adds a hidden ${fact[1]}`;
+    if (/link text shows/.test(w)) return "A link that goes somewhere other than it says";
+    return "Might be aimed at an AI";
+  }
+
+  // Pieces of one hidden message often arrive as several text nodes (one per line).
+  // Join neighbours that were hidden the same way so the panel shows one message.
+  function merge(findings) {
+    const out = [];
+    for (const f of findings) {
+      const last = out[out.length - 1];
+      if (last && f.el && last.els.includes(f.el) && last.level === f.level && how(last.where) === how(f.where)) {
+        last.text += " " + f.text; if (!last.els.includes(f.el)) last.els.push(f.el); last.why = [...new Set(last.why.concat(f.why || []))];
+      } else out.push({ text: f.text, where: f.where, why: f.why || [], level: f.level, els: f.els || [f.el] });
     }
+    return out;
+  }
+
+  let lastVerdict = null;   // what the popup shows, so the badge, popup and page always agree
+  let lastGroups = [];
+  let lastKey = null;       // don't redraw (or re-animate) when a rescan finds the same thing
+  const byGemma = g => (g.why || []).some(w => /^talks to an AI \([^)]*gemma/i.test(w));
+
+  // Quiet by default. A real threat shows a small pill in the corner that shrinks to a dot;
+  // clicking it opens a short card. Anything less serious only changes the toolbar badge.
+  function render(threats, cautions, opts = {}) {
+    let root = document.getElementById("parallax-panel");
+    const show = threats.length || (opts.force && cautions.length);
+    if (!show) { root && root.remove(); lastKey = null; return; }
+    const key = keyOf(threats, cautions) + (opts.title || "");
+    if (root && key === lastKey && !opts.force) return;
+    lastKey = key;
+    const groups = merge(threats.concat(cautions));
+    if (!root) { root = document.createElement("div"); root.id = "parallax-panel"; document.documentElement.appendChild(root); }
+    root.className = threats.length ? "px-threat" : "px-caution";
+    const data = { groups, isThreat: !!threats.length, title: opts.title, key: keyOf(threats, cautions) };
+    opts.force ? openCard(root, data) : openPill(root, data);
+  }
+
+  function openPill(root, d) {
+    const n = d.groups.filter(g => g.level === "threat").length || d.groups.length;
+    root.innerHTML = "";
+    const pill = document.createElement("button"); pill.className = "px-pill";
+    pill.setAttribute("aria-label", `Parallax: ${n} hidden message${n > 1 ? "s" : ""} found. Open details.`);
+    pill.innerHTML = '<span class="px-dot"></span><span class="px-pill-n"></span><span class="px-pill-text"></span>';
+    pill.querySelector(".px-pill-n").textContent = String(n);
+    pill.querySelector(".px-pill-text").textContent = n > 1 ? "hidden messages" : "hidden message";
+    pill.onclick = () => openCard(root, d);
+    root.append(pill);
+    setTimeout(() => pill.classList.add("px-small"), 6000);   // shrink to just the dot and number
+  }
+
+  function openCard(root, d) {
+    const n = d.groups.filter(g => g.level === "threat").length || d.groups.length, top = d.groups[0];
+    root.innerHTML = "";
+    const card = document.createElement("div"); card.className = "px-card";
+
+    const head = document.createElement("div"); head.className = "px-top";
+    const brand = document.createElement("span"); brand.className = "px-brand"; brand.innerHTML = LOGO + "<span>parallax</span>";
+    const min = document.createElement("button"); min.className = "px-x"; min.setAttribute("aria-label", "Minimize"); min.textContent = "–";
+    min.onclick = () => openPill(root, d);
+    head.append(brand, min);
+
+    const status = document.createElement("div"); status.className = "px-status";
+    status.textContent = d.title || (d.isThreat ? (n > 1 ? `${n} hidden messages found` : "Hidden message found") : "Hidden text found");
+    const sub = document.createElement("div"); sub.className = "px-sub";
+    sub.textContent = d.isThreat ? "Suspicious text hidden on this page could affect an AI assistant."
+                                 : "This page has text you can't see. It's probably harmless.";
+    const quote = document.createElement("div"); quote.className = "px-quote"; quote.textContent = top.text.slice(0, 280);
+    card.append(head, status, sub, quote);
+
+    const details = document.createElement("details"); details.className = "px-details";
+    const summary = document.createElement("summary"); summary.textContent = "Review all findings";
+    details.append(summary);
+    for (const g of d.groups) {
+      const item = document.createElement("div"); item.className = "px-detail";
+      const text = document.createElement("p"); text.textContent = g.text;
+      const reason = document.createElement("p"); reason.className = "px-sub";
+      reason.textContent = (g.level === "threat" ? "Threat · " : "Caution · ") + what(g.why) + " · " + how(g.where) + ". " + g.why.join("; ");
+      item.append(text, reason); details.append(item);
+    }
+    card.append(details);
+
+    const tags = document.createElement("div"); tags.className = "px-tags";
+    if (d.groups.some(byGemma)) { const t = document.createElement("span"); t.className = "px-tag px-gemma"; t.textContent = "Confirmed by Gemma"; tags.append(t); }
+    if (d.groups.length > 1) { const t = document.createElement("span"); t.className = "px-tag"; t.textContent = `+${d.groups.length - 1} more`; tags.append(t); }
+    if (tags.childNodes.length) card.append(tags);
+
     const btns = document.createElement("div"); btns.className = "px-btns";
-    const reveal = document.createElement("button"); reveal.textContent = "Reveal on page";
-    reveal.onclick = () => { for (const f of items) if (f.el) f.el.classList.toggle("parallax-reveal"); };
-    const close = document.createElement("button"); close.textContent = "Dismiss";
-    close.onclick = () => { dismissedKey = keyOf(threats, cautions); panel.remove(); };
-    btns.append(reveal, close); panel.appendChild(btns);
+    const els = d.groups.flatMap(g => g.els).filter(Boolean);
+    if (els.length) {
+      const reveal = document.createElement("button"); reveal.className = "px-btn"; reveal.textContent = "Show on page";
+      reveal.onclick = () => { const on = !els[0].classList.contains("parallax-reveal");
+        els.forEach(el => el.classList.toggle("parallax-reveal", on)); reveal.textContent = on ? "Hide again" : "Show on page"; };
+      btns.append(reveal);
+    }
+    const ignore = document.createElement("button"); ignore.className = "px-btn px-ghost"; ignore.textContent = "Ignore";
+    ignore.onclick = () => { dismissedKey = d.key; root.remove(); lastKey = null; };
+    btns.append(ignore);
+    card.append(btns);
+    root.append(card);
   }
 
   // Results from a right-click file scan are shown in the same panel.
-  chrome.runtime.onMessage.addListener(msg => {
+  chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+    if (msg.type === "getState") { reply(lastVerdict); return; }
+    if (msg.type === "details") {
+      if (lastGroups.length) render(lastGroups.filter(g => g.level === "threat").map(g => ({ ...g, el: g.els[0] })),
+        lastGroups.filter(g => g.level === "caution").map(g => ({ ...g, el: g.els[0] })), { force: true });
+      reply({ shown: !!lastGroups.length }); return;
+    }
+    if (msg.type === "reveal") {
+      const els = lastGroups.flatMap(g => g.els).filter(Boolean);
+      const on = els.length && !els[0].classList.contains("parallax-reveal");
+      els.forEach(el => el.classList.toggle("parallax-reveal", on));
+      if (els[0] && on) els[0].scrollIntoView({ behavior: "smooth", block: "center" });
+      reply({ on }); return;
+    }
     if (msg.type === "fileResult") {
       const r = msg.report;
       const f = (r.findings || []).filter(x => x.level !== "info");
       if (!f.length) { alert(`Parallax: ${r.headline}`); return; }
-      render(f.filter(x => x.level === "threat"), f.filter(x => x.level === "caution"));
-      document.querySelector("#parallax-panel .px-head").textContent = "Parallax: " + r.headline;
+      render(f.filter(x => x.level === "threat"), f.filter(x => x.level === "caution"), { force: true, title: r.headline });
     }
   });
 
@@ -132,5 +266,6 @@
   new MutationObserver(muts => {
     if (muts.some(m => !isOurs(m))) rescan();
   }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  chrome.storage.onChanged.addListener(ch => { if (ch.paused) { lastKey = null; dismissedKey = null; scan(); } });
   scan();
 })();

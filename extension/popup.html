@@ -1,38 +1,100 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
+<title>Parallax</title>
 <style>
-  body { width: 320px; font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; margin: 12px; color: #1c1b19; }
-  h1 { font-size: 16px; margin: 0 0 8px; }
-  .v { padding: 8px; border-radius: 8px; margin-bottom: 10px; font-weight: 600; }
-  .threat { background: #fdecea; color: #b42318; } .caution { background: #fff4dd; color: #9a6100; } .clean { background: #e7f5ee; color: #1f7a4d; }
-  button { display: block; width: 100%; text-align: left; font: inherit; padding: 8px 10px; margin: 6px 0;
-    border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; box-sizing: border-box; }
-  #out { font-size: 13px; color: #444; white-space: pre-wrap; margin-top: 8px; }
-  small { color: #6b6862; }
+  body { width: 300px; margin: 0; padding: 16px; background: #0a0a0a; color: #f5f5f5;
+    font: 13px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .brand { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .logo { display: flex; align-items: center; gap: 8px; font: 500 13px "JetBrains Mono", ui-monospace, Menlo, monospace; }
+
+  /* Big status, like a VPN */
+  .status { text-align: center; padding: 6px 0 14px; }
+  .ring { width: 56px; height: 56px; margin: 0 auto 10px; border-radius: 50%; display: grid; place-items: center;
+    background: rgba(61, 126, 255, .12); border: 1px solid rgba(61, 126, 255, .35); }
+  .ring::after { content: ""; width: 14px; height: 14px; border-radius: 50%; background: #3d7eff; }
+  .threat .ring { background: rgba(255, 77, 94, .12); border-color: rgba(255, 77, 94, .4); }
+  .threat .ring::after { background: #ff4d5e; }
+  .caution .ring { background: rgba(245, 184, 74, .12); border-color: rgba(245, 184, 74, .4); }
+  .caution .ring::after { background: #f5b84a; }
+  .paused .ring { background: #141414; border-color: #2e2e2e; }
+  .paused .ring::after { background: #737373; }
+  .title { font-size: 17px; font-weight: 600; }
+  .sub { color: #8a8a8a; font-size: 12px; margin-top: 2px; }
+
+  .quote { margin: 4px 0 8px; padding: 0 10px; border-left: 2px solid #ff4d5e; background: #141414; border-radius: 0 6px 6px 0;
+    border-top: 8px solid #141414; border-bottom: 8px solid #141414;
+    font: 12px/1.5 "JetBrains Mono", ui-monospace, Menlo, monospace; color: #e5e5e5; word-break: break-word;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid #24406e; color: #9cc0ff; font-size: 11px; }
+  .primary { display: block; width: 100%; margin-top: 10px; padding: 9px; border: 0; border-radius: 8px;
+    background: #f5f5f5; color: #0a0a0a; font: inherit; font-weight: 600; cursor: pointer; }
+  .primary:hover { background: #d4d4d4; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-top: 1px solid #1f1f1f; margin-top: 14px; }
+  .switch { position: relative; width: 36px; height: 20px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; border-radius: 999px; background: #2e2e2e; cursor: pointer; transition: background .2s; }
+  .slider::before { content: ""; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .2s; }
+  .switch input:checked + .slider { background: #3d7eff; }
+  .switch input:checked + .slider::before { transform: translateX(16px); }
+  .switch input:focus-visible + .slider { outline: 2px solid #808080; outline-offset: 2px; }
+
+  .links { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid #1f1f1f; padding-top: 8px; }
+  .link, label.link { all: unset; cursor: pointer; color: #a3a3a3; font-size: 12px; padding: 4px 0; }
+  .link:hover, label.link:hover { color: #fff; }
+  #out { font-size: 12px; color: #a3a3a3; white-space: pre-wrap; margin-top: 6px; }
+  small { display: block; margin-top: 8px; color: #525252; font-size: 11px; }
+  .settings { border-top: 1px solid #1f1f1f; margin-top: 10px; padding-top: 10px; color: #a3a3a3; font-size: 12px; }
+  summary { cursor: pointer; }
+  #server-form { margin-top: 10px; }
+  #server { box-sizing: border-box; width: 100%; margin-top: 5px; padding: 8px; border: 1px solid #2e2e2e; border-radius: 6px; background: #141414; color: #fff; }
+  #server-status { margin-top: 6px; }
+  button:disabled { opacity: .5; cursor: default; }
   [hidden] { display: none !important; }
-  #server-form { margin-top: 12px; font-size: 12px; }
-  .server-row { display: flex; gap: 6px; align-items: center; }
-  #server { min-width: 0; flex: 1; padding: 7px; border: 1px solid #ddd; border-radius: 8px; }
-  #save-server { width: auto; }
 </style>
 </head>
 <body>
-  <h1>Parallax</h1>
-  <div id="verdict" class="v clean">Checking this page…</div>
-  <button id="cloak">Check if this page shows AI something different</button>
-  <button id="scan-file">Scan a PDF, Word file or saved email…</button>
-  <button id="scan-pdf" hidden>Scan this PDF</button>
-  <div id="out"></div>
-  <form id="server-form">
-    <label for="server">Server</label>
-    <div class="server-row">
-      <input id="server" type="text" placeholder="http://localhost:8787" spellcheck="false">
-      <button id="save-server" type="submit">Save</button>
-    </div>
-    <small id="server-status" role="status"></small>
-  </form>
+  <div class="brand">
+    <span class="logo">
+      <svg viewBox="0 0 28 28" width="20" height="20" aria-hidden="true"><circle cx="10.5" cy="14" r="8.5" fill="none" stroke="#fff" stroke-width="1.6"/><circle cx="17.5" cy="14" r="8.5" fill="none" stroke="#3d7eff" stroke-width="1.6"/></svg>
+      parallax
+    </span>
+  </div>
+
+  <div id="status" class="status" role="status" aria-live="polite">
+    <div class="ring"></div>
+    <div id="title" class="title">Checking…</div>
+    <div id="sub" class="sub"></div>
+  </div>
+
+  <div id="found" hidden>
+    <div id="quote" class="quote"></div>
+    <span id="gemma" class="tag" hidden>Confirmed by Gemma</span>
+    <button id="details" class="primary">Review findings on page</button>
+    <button id="show" class="link">Show hidden text on page</button>
+  </div>
+
+  <div class="row">
+    <span>Scan this site</span>
+    <label class="switch"><input id="toggle" type="checkbox" aria-label="Scan this site" checked><span class="slider"></span></label>
+  </div>
+
+  <div class="links">
+    <button id="scan-file" class="link">Scan a PDF, Word file or saved email</button>
+    <button id="scan-pdf" class="link" hidden>Scan this open PDF</button>
+    <button id="cloak" class="link">Check what AI bots see on this page</button>
+  </div>
+  <div id="out" role="status" aria-live="polite"></div>
+  <details class="settings"><summary>Server settings</summary>
+    <form id="server-form">
+      <label for="server">Server address</label>
+      <input id="server" type="url" required placeholder="http://localhost:8787">
+      <button class="primary" type="submit">Save server</button>
+      <div id="server-status" role="status" aria-live="polite"></div>
+    </form>
+  </details>
   <script src="server.js"></script>
   <script src="popup.js"></script>
 </body>

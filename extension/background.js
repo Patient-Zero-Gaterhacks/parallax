@@ -24,9 +24,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     return true; // async reply
   }
   if (msg.type === "verdict" && sender.tab) {
-    const colors = { threat: "#b42318", caution: "#9a6100", clean: "#1f7a4d" };
+    const colors = { threat: "#ff4d5e", caution: "#f5b84a", clean: "#3d7eff", paused: "#737373" };
     chrome.action.setBadgeBackgroundColor({ tabId: sender.tab.id, color: colors[msg.verdict] });
-    chrome.action.setBadgeText({ tabId: sender.tab.id, text: msg.verdict === "threat" ? String(msg.count) : msg.verdict === "caution" ? "?" : "" });
+    chrome.action.setBadgeText({ tabId: sender.tab.id, text: msg.verdict === "threat" ? String(msg.count) : msg.verdict === "caution" ? "?" : msg.verdict === "paused" ? "off" : "" });
     chrome.storage.session.set({ ["tab" + sender.tab.id]: msg });
   }
   if (msg.type === "scanUrl") {
