@@ -8,7 +8,12 @@ check each run of text for Word's ways of hiding it:
   * text color equal to its background (run / paragraph / cell shading)
   * tiny font size
 
-Headers, footers, text boxes, footnotes and comments are included, since parsers read them.
+Headers, footers, text boxes and footnotes are included, since parsers read them.
+
+We also report document data Word doesn't show on the page but parsers
+pass on: core properties (title, subject, keywords, comments), reviewer
+comments, tracked deletions (w:delText) and image alt text. Their reasons
+start with "markup:" so the judge treats them gently (see scan._judge).
 """
 
 from __future__ import annotations
@@ -17,12 +22,15 @@ import zipfile
 
 from lxml import etree
 
-from .html_gap import HiddenSpan, contrast, parse_color
+from .html_gap import MARKUP, HiddenSpan, contrast, parse_color
 from .text import instruction_score, invisible_chars
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": W}
+CORE = {"dc": "http://purl.org/dc/elements/1.1/",
+        "cp": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties"}
 MIN_HALF_POINTS = 8  # w:sz is in half-points: 8 = 4pt
+PROSE_WORDS = 5      # core properties shorter than this are labels, not messages
 
 
 def _q(tag):
@@ -55,8 +63,55 @@ def _parts(z: zipfile.ZipFile):
     names = z.namelist()
     main = ["word/document.xml"]
     extra = [n for n in names if n.startswith("word/header") or n.startswith("word/footer")
-             or n in ("word/footnotes.xml", "word/endnotes.xml", "word/comments.xml")]
+             or n in ("word/footnotes.xml", "word/endnotes.xml")]
     return main + sorted(extra)
+
+
+def _span(text: str, reasons: list[str]) -> HiddenSpan:
+    sc, hits = instruction_score(text)
+    return HiddenSpan(text, reasons, sc, hits)
+
+
+def _core_properties(z: zipfile.ZipFile) -> list[HiddenSpan]:
+    if "docProps/core.xml" not in z.namelist():
+        return []
+    root = etree.fromstring(z.read("docProps/core.xml"))
+    out = []
+    # Word's "Comments" property is dc:description
+    for tag, label in (("dc:title", "title"), ("dc:subject", "subject"), ("cp:keywords", "keywords"),
+                       ("dc:description", "comments/description")):
+        el = root.find(tag, CORE)
+        v = (el.text or "").strip() if el is not None else ""
+        if len(v.split()) >= PROSE_WORDS:
+            out.append(_span(v, [f"{MARKUP} document properties ({label})"]))
+    return out
+
+
+def _comments(z: zipfile.ZipFile) -> list[HiddenSpan]:
+    if "word/comments.xml" not in z.namelist():
+        return []
+    out = []
+    for c in etree.fromstring(z.read("word/comments.xml")).iter(_q("comment")):
+        text = " ".join("".join(t.text or "" for t in p.iter(_q("t"))) for p in c.iter(_q("p"))).strip()
+        if text:
+            out.append(_span(text, [f"{MARKUP} reviewer comment"]))
+    return out
+
+
+def _part_markup(root, where: str) -> list[HiddenSpan]:
+    """Tracked deletions and image alt text in one part."""
+    out = []
+    loc = [f"in {where}"] if where != "document" else []
+    for p in root.iter(_q("p")):
+        text = "".join(t.text or "" for t in p.iter(_q("delText"))).strip()
+        if text:
+            out.append(_span(text, [f"{MARKUP} deleted text (tracked changes)"] + loc))
+    for el in root.iter("{*}docPr"):
+        for attr in ("descr", "title"):
+            v = (el.get(attr) or "").strip()
+            if v:
+                out.append(_span(v, [f"{MARKUP} image alt text"] + loc))
+    return out
 
 
 def analyze_docx(path: str) -> dict:
@@ -72,6 +127,7 @@ def analyze_docx(path: str) -> dict:
     for part in _parts(z):
         root = doc_root if part == "word/document.xml" else etree.fromstring(z.read(part))
         where = part.split("/")[-1].replace(".xml", "")
+        spans += _part_markup(root, where)
         for r in root.iter(_q("r")):
             text = "".join(t.text or "" for t in r.iter(_q("t")))
             if not text.strip():
@@ -128,6 +184,7 @@ def analyze_docx(path: str) -> dict:
                 spans.append(HiddenSpan(payload, reasons + ([f"in {where}"] if where != "document" else []), sc, hits))
             else:
                 visible_parts.append(text)
+    spans += _comments(z) + _core_properties(z)
     z.close()
     return {"visible_text": " ".join(visible_parts), "hidden": spans,
             "attack": any(s.is_attack for s in spans)}
