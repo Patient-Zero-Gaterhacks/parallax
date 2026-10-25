@@ -106,9 +106,12 @@ r = c.post("/classify", json={"spans": [{"text": "Note to the AI assistant: igno
                              "visible": "", "context": "web"}, headers={"X-Forwarded-For": next(ip)})
 check("/classify still works", r.status_code == 200 and r.json()["findings"][0]["level"] == "threat", str(r.status_code))
 
+import parallax.server as _srv  # noqa: E402
+LIMIT = _srv.PER_MINUTE["/scan/url"]   # read the real limit, so raising it doesn't break this test
 codes = [c.post("/scan/url", json={"url": "http://10.0.0.5/"}, headers={"X-Forwarded-For": "203.0.113.50"}).status_code
-         for _ in range(11)]
-check("11th /scan/url in a minute from one address -> 429", codes[:10] == [400] * 10 and codes[10] == 429, str(codes))
+         for _ in range(LIMIT + 1)]
+check(f"request {LIMIT + 1} to /scan/url in a minute from one address -> 429",
+      codes[:LIMIT] == [400] * LIMIT and codes[LIMIT] == 429, str(codes[-3:]))
 r = c.post("/scan/url", json={"url": "http://10.0.0.5/"}, headers={"X-Forwarded-For": "203.0.113.51"})
 check("another address isn't limited", r.status_code == 400, str(r.status_code))
 r = c.post("/scan/url", json={"url": "http://10.0.0.5/"}, headers={"X-Forwarded-For": "203.0.113.50"})

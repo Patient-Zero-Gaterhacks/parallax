@@ -29,12 +29,13 @@ Parallax compares what a person sees with what the AI reads, judges whether the 
 
 ## Try it
 
+- **Website:** https://z6tfp4t9fcdojg-8787.proxy.runpod.net — what Parallax does, with the "same email, two readings" demo
 - **Demo inbox:** https://z6tfp4t9fcdojg-8787.proxy.runpod.net/demo — the same requests to an assistant, with and without Parallax
 - **Attack lab:** https://z6tfp4t9fcdojg-8787.proxy.runpod.net/lab — pages and files with hidden attacks
 - **Chrome extension:** load `extension/` unpacked ([steps](#2-chrome-extension)). It uses the hosted server, so our fine-tuned Gemma works with nothing running on your laptop.
 - **Model:** [brandenxo/parallax-gemma](https://huggingface.co/brandenxo/parallax-gemma)
 
-The hosted server runs on a rented GPU during judging and may be off afterwards; everything also runs locally ([Getting started](#getting-started)).
+One server hosts all of it: the website, the demo, the attack lab and the scanning API with Gemma. It runs on a rented GPU during judging and may be off afterwards; everything also runs locally ([Getting started](#getting-started)).
 
 ## How it works
 
@@ -112,7 +113,7 @@ Notes:
 - Gemma turns vague warnings into firm answers: with it there are fewer "caution" results, and a few attacks that used to get a caution now get none (hand-written: 30 threat + 9 caution without Gemma, 32 + 0 with).
 - A second, longer Gemma training run caught slightly more but was "unsure" on far more clean text. It didn't pass the bar we set before training, so we ship the first.
 - Weak spot: BIPIA (mostly off-topic questions rather than instructions; 6 / 75 caught).
-- **Real websites:** in a 30-site manual test (Wikipedia, GitHub, BBC, CNN, NYT, Apple, Etsy...), every remaining warning came from rules, not the models, and Gemma cleared the one model-made false alarm. We also use 243 saved real pages from the Mozilla Readability and Trafilatura test sets to find and fix the rules behind false alarms (`tests/test_real_site_false_alarms.py`).
+- **Real websites:** in a 30-site manual test (Wikipedia, GitHub, BBC, CNN, NYT, Apple, Etsy...), every remaining warning came from rules, not the models, and Gemma cleared the one model-made false alarm. We then ran 243 saved real pages from the Mozilla Readability and Trafilatura test sets and fixed the rules behind each false alarm: the server's page scan went from 139 pages flagged as threats to 2 (238 clean, 3 caution), and the slowest page from 70 seconds to under 1 (`python3 scripts/real_pages_check.py`, `tests/test_real_pages.py`).
 
 ## Limitations
 
@@ -139,7 +140,7 @@ pip install -r requirements.txt
 uvicorn parallax.server:app --port 8787
 ```
 
-Demo at http://localhost:8787/demo, attack lab at http://localhost:8787/lab. To add our fine-tuned Gemma as the second pass:
+Demo at http://localhost:8787/demo, attack lab at http://localhost:8787/lab. If you've built the website (`cd frontend && npm run build`), the server also serves it at http://localhost:8787/. To add our fine-tuned Gemma as the second pass:
 
 ```bash
 pip install -r requirements-ml.txt
@@ -159,7 +160,8 @@ PARALLAX_ML_TRANSFORMER=brandenxo/parallax-gemma uvicorn parallax.server:app --p
 ### 3. Website
 
 ```bash
-cd frontend && npm install && npm run dev      # http://localhost:5173
+cd frontend && npm install && npm run dev      # http://localhost:5173 while editing
+npm run build                                   # frontend/dist, served by the Parallax server at /
 ```
 
 ### 4. MCP gateway (Claude Desktop, Cursor, Claude Code)
@@ -188,10 +190,12 @@ Keys go in your environment or a `.env` file (`cp .env.example .env`); never com
 
 ### Hosting it for others
 
-`scripts/serve_public.sh` runs the server in **public mode** (`PARALLAX_PUBLIC=1`): URL scans only reach public addresses (checked again on every redirect), the approval and gateway pages are off, uploads and requests are size-capped and each client IP is rate-limited. We host it on a RunPod GPU pod with HTTP port 8787 exposed:
+`scripts/serve_public.sh` runs the server in **public mode** (`PARALLAX_PUBLIC=1`): URL scans only reach public addresses (checked again on every redirect), the approval and gateway pages are off, uploads and requests are size-capped and each client IP is rate-limited. We host it on a RunPod GPU pod with HTTP port 8787 exposed. The built website (`frontend/dist`) isn't in git, so copy it to the server after each change:
 
 ```bash
-nohup bash scripts/serve_public.sh > /dev/null 2>&1 &      # logs: /workspace/server.log
+cd frontend && npm run build && cd ..                                  # on your machine
+rsync -a frontend/dist/ <server>:/path/to/parallax/frontend/dist/      # then, on the server:
+nohup bash scripts/serve_public.sh > /dev/null 2>&1 &                  # logs: /workspace/server.log
 ```
 
 ## Tests

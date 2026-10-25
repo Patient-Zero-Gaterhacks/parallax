@@ -45,7 +45,7 @@ from .scan import _judge, remove_quietly, scan_file, scan_html, scan_url
 PUBLIC = os.environ.get("PARALLAX_PUBLIC") == "1"
 MB = 1024 * 1024
 MAX_BODY = {"/scan/file": 20 * MB, "/scan/html": 2 * MB}
-PER_MINUTE = {"/classify": 60, "/scan/file": 10, "/scan/url": 10, "/scan/html": 30}
+PER_MINUTE = {"/classify": 600, "/scan/file": 60, "/scan/url": 60, "/scan/html": 120}
 CLOSED = ("/approve", "/gateway")   # read and write ~/.parallax: local use only
 
 _hits: dict = defaultdict(deque)
