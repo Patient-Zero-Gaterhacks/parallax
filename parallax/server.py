@@ -10,6 +10,7 @@
     GET  /demo                                           -> demo UI
     GET  /lab/...                                        -> attack test pages
     GET  /approve/{id}                                   -> approve an action the MCP gateway paused
+    GET  /                                               -> the website (frontend/dist), if built
 
 Public mode (PARALLAX_PUBLIC=1, for hosting; see scripts/serve_public.sh): URL scans only reach public
 internet addresses (parallax/netsafe.py), /approve and /gateway are off (they read ~/.parallax), request
@@ -305,3 +306,11 @@ def gateway_events():
     st = Store()
     return {"events": st.load("events", [])[-50:], "changed_tools": st.load("pending_tools", {}),
             "pending": [a for a in st.load("approvals", {}).values() if a["status"] == "pending"]}
+
+
+# The website (frontend/dist, built with `npm run build`) at "/", so one link serves both the site and the
+# API. Mounted last: every route above wins. Static files only; with no built folder, nothing changes.
+SITE_DIR = Path(os.environ.get("PARALLAX_SITE_DIR", Path(__file__).resolve().parents[1] / "frontend" / "dist"))
+if (SITE_DIR / "index.html").is_file():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=SITE_DIR, html=True), name="site")
