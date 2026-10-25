@@ -236,7 +236,7 @@
     for (const el of doc.querySelectorAll("*")) {
       if (out.length >= limit) break;
       const tag = el.tagName.toLowerCase();
-      if (tag === "style" || el.closest("#parallax-panel")) continue;
+      if (tag === "style" || el.closest("#parallax-panel, .parallax-label, .parallax-label-box")) continue;
       if (tag === "script") {
         if (!/ld\+json/i.test(el.getAttribute("type") || "")) continue;
         const raw = el.textContent || "";
@@ -280,7 +280,7 @@
     const walker = doc.createTreeWalker(doc.body, 4 /* SHOW_TEXT */);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const p = n.parentElement;
-      if (!p || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(p.tagName) || p.closest("#parallax-panel")) continue;
+      if (!p || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(p.tagName) || p.closest("#parallax-panel, .parallax-label, .parallax-label-box")) continue;
       const text = n.nodeValue.trim();
       if (!text) continue;
       const reasons = assess(n, env);

@@ -86,11 +86,14 @@ with sync_playwright() as p, tempfile.TemporaryDirectory() as prof:
         pg.wait_for_timeout(300)
     pg.wait_for_timeout(2500)   # let the server's answer replace the quick verdict
     pg.click("#parallax-panel .px-pill"); pg.wait_for_timeout(400)
-    pg.evaluate("document.querySelector('#parallax-panel details').open = true")
     txt = pg.inner_text("#parallax-panel")
+    # the card no longer lists reasons, so ask the page what it's showing (same as the popup does)
+    state = ep.evaluate(f"""async () => {{ const [t] = await chrome.tabs.query({{ url: '{srv}/page' }});
+                                         return chrome.tabs.sendMessage(t.id, {{ type: 'getState' }}); }}""")
     ctx.close()
 httpd.shutdown()
-check("card shows the server's reasons, not the quick offline ones", "parallax-transformer" in txt and "offline check" not in txt)
+check("page shows the server's answer, not the quick offline one", state and state.get("quick") is False and state.get("gemma"),
+      f"({state})")
 check("card shows 'Confirmed by Gemma' for our fine-tuned model", "Confirmed by Gemma" in txt)
 print("\nALL PASS" if all(ok) else "\nSOME CHECKS FAILED")
 sys.exit(0 if all(ok) else 1)

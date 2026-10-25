@@ -139,12 +139,13 @@
     if (location.href !== lastUrl) {   // SPA route change: drop the previous page's result
       lastUrl = location.href; lastVerdict = null; lastGroups = []; lastMessage = null;
       applied = { ver: applied.ver, key: null, quick: false };
+      hideAll();
     }
     const paused = await isPaused();
     if (ver !== started) return;
     document.documentElement.dataset.parallax = paused ? "paused" : "on";
     if (paused) {
-      document.querySelectorAll(".parallax-reveal").forEach(el => el.classList.remove("parallax-reveal"));
+      hideAll();
       applied = { ver, key: null, quick: false };   // answers to earlier scans can't overwrite the pause
       lastVerdict = { verdict: "paused" }; lastGroups = []; lastKey = null;
       removePanel();
@@ -152,6 +153,9 @@
       tellPlayground();
       return;
     }
+    // While Show on page is on, the hidden text is visible on purpose: rescanning now would drop it from the
+    // list. Scan again once it's hidden.
+    if (revealed) return;
     styleCache = new WeakMap();
     const { hidden, visible } = D.scanDocument(document, env);
     // Collapse duplicates and keep the request small.
@@ -317,18 +321,13 @@
     }
 
     const btns = document.createElement("div"); btns.className = "px-btns";
-    const els = d.groups.flatMap(g => g.els).filter(Boolean);
-    if (els.length) {
+    if (!d.title) {   // file scan results (d.title) aren't on this page: nothing to show
       const reveal = document.createElement("button"); reveal.className = "px-btn";
-      reveal.textContent = els[0].classList.contains("parallax-reveal") ? "Hide again" : "Show on page";   // survives redraws
-      reveal.onclick = () => { const on = !els[0].classList.contains("parallax-reveal");
-        els.forEach(el => el.classList.toggle("parallax-reveal", on)); reveal.textContent = on ? "Hide again" : "Show on page";
-        if (on) {   // revealed text sits in place now (even if it was moved off the page): take the user there
-          els[0].scrollIntoView({ behavior: "smooth", block: "center" });
-          els[0].classList.remove("parallax-flash"); void els[0].offsetWidth;   // restart the flash if clicked again
-          els[0].classList.add("parallax-flash");
-          setTimeout(() => els[0].classList.remove("parallax-flash"), 1200);
-        } };
+      reveal.textContent = revealed ? "Hide again" : "Show on page";   // survives redraws
+      reveal.onclick = () => {
+        if (revealed) { hideAll(); rescan(); } else revealAll(d.groups);
+        reveal.textContent = revealed ? "Hide again" : "Show on page";
+      };
       btns.append(reveal);
     }
     const ignore = document.createElement("button"); ignore.className = "px-btn px-ghost"; ignore.textContent = "Ignore";
@@ -336,6 +335,103 @@
     btns.append(ignore);
     card.append(btns);
     root.append(card);
+  }
+
+  // ---- Show on page --------------------------------------------------------
+  // Reveals every red and yellow finding. The text's own element gets .parallax-reveal; each ancestor that
+  // hides it (a display:none parent, a see-through or shrunk wrapper...) gets only the inline styles that undo
+  // that hiding, so the page layout around it stays put. Markup an AI reads but the page never shows (alt text,
+  // hidden fields, meta tags, JSON-LD, comments, <template>) gets a red label next to its element, or in one
+  // box at the top of the page. Every class and style attribute is saved first, so hiding again restores the
+  // page exactly.
+  let revealed = null;   // { saved: Map(el -> {cls, style}), added: [label nodes] } while Show on page is on
+  const NOTHING_TO_SHOW = /^markup:|^HTML comment|<template>/;
+
+  // The inline fixes that stop an ancestor from hiding what's inside it (none if it doesn't hide anything).
+  function unhide(a) {
+    const s = getComputedStyle(a), fix = [];
+    if (s.display === "none") fix.push(["display", "block"]);
+    if (s.visibility === "hidden" || s.visibility === "collapse") fix.push(["visibility", "visible"]);
+    if (parseFloat(s.opacity) < 1) fix.push(["opacity", "1"]);
+    if (/hidden|clip/.test(s.overflow) && (parseFloat(s.width) <= 1 || parseFloat(s.height) <= 1))
+      fix.push(["overflow", "visible"], ["width", "auto"], ["height", "auto"], ["max-height", "none"]);
+    if (s.clip && s.clip !== "auto") fix.push(["clip", "auto"]);
+    if (s.clipPath && s.clipPath !== "none") fix.push(["clip-path", "none"]);
+    const m = /matrix\(([^)]+)\)/.exec(s.transform || "");
+    if (m) {   // scaled to nothing, or moved thousands of pixels away
+      const v = m[1].split(",").map(Number);
+      if ((Math.abs(v[0]) <= 0.05 && Math.abs(v[1]) <= 0.05) || (Math.abs(v[2]) <= 0.05 && Math.abs(v[3]) <= 0.05) ||
+          Math.abs(v[4]) > 2000 || Math.abs(v[5]) > 2000) fix.push(["transform", "none"]);
+    }
+    if (/absolute|fixed/.test(s.position) && ["left", "right", "top", "bottom"].some(k => parseFloat(s[k]) < -1000))
+      fix.push(["position", "static"]);
+    return fix;
+  }
+
+  // What a markup finding is, in plain words, for its label.
+  function labelText(g) {
+    const w = (g.where || []).join(" "), text = g.text.length > 300 ? g.text.slice(0, 300) + "…" : g.text;
+    const link = /link text shows (\S+) but goes to (\S+)/.exec(w);
+    if (link) return `This link shows ${link[1]} but goes to ${link[2]}`;
+    const kind = /alt text/.test(w) ? "alt text" : /title attribute/.test(w) ? "tooltip text"
+      : /aria-|placeholder|summary attribute/.test(w) ? "label" : /data attribute/.test(w) ? "data attribute"
+      : /hidden form field/.test(w) ? "form field" : /meta tag/.test(w) ? "page description"
+      : /JSON-LD/.test(w) ? "structured data" : /HTML comment/.test(w) ? "comment in the page code"
+      : /template/.test(w) ? "template text" : "text";
+    return `Hidden ${kind} (an AI reads this): ${text}`;
+  }
+
+  function revealAll(groups) {
+    if (revealed || !groups.length) return;
+    revealed = { saved: new Map(), added: [] };
+    const save = el => { if (!revealed.saved.has(el)) revealed.saved.set(el, { cls: el.getAttribute("class"), style: el.getAttribute("style") }); };
+    let box = null, first = null;
+    for (const g of groups) {
+      const els = (g.els || []).filter(el => el && el.isConnected);
+      if (els.length && !(g.where || []).some(r => NOTHING_TO_SHOW.test(r))) {
+        for (const el of els) {
+          save(el); el.classList.add("parallax-reveal");
+          for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+            const fix = unhide(a);
+            if (fix.length) { save(a); fix.forEach(([k, v]) => a.style.setProperty(k, v, "important")); }
+          }
+        }
+        first = first || els[0];
+        continue;
+      }
+      // Nothing to show: label it next to its element if that spot is visible, otherwise in the box at the top.
+      const label = document.createElement("span"); label.className = "parallax-label"; label.textContent = labelText(g);
+      const el = els[0], spot = el && !el.closest("head") && el.parentElement;
+      if (spot && spot.checkVisibility && spot.checkVisibility({ visibilityProperty: true, opacityProperty: true })) {
+        el.after(label); revealed.added.push(label);
+      } else {
+        if (!box) {
+          box = document.createElement("div"); box.className = "parallax-label-box";
+          const head = document.createElement("strong"); head.textContent = "Parallax: hidden text on this page that AI assistants read";
+          box.append(head); document.body.prepend(box); revealed.added.push(box);
+        }
+        box.append(label);
+      }
+      first = first || label;
+    }
+    if (first) {   // take the user to the first finding and flash it so the eye finds it
+      first.scrollIntoView({ behavior: "smooth", block: "center" });
+      save(first); first.classList.add("parallax-flash");
+      setTimeout(() => { if (revealed && revealed.saved.has(first)) first.classList.remove("parallax-flash"); }, 1200);
+    }
+  }
+
+  function hideAll() {
+    if (!revealed) return;
+    for (const [el, { cls, style }] of revealed.saved) {
+      cls === null ? el.removeAttribute("class") : el.setAttribute("class", cls);
+      // Chrome writes style changes made with setProperty into the attribute lazily: read it first, or a
+      // removed style attribute comes back later as style=""
+      el.getAttribute("style");
+      style === null ? el.removeAttribute("style") : el.setAttribute("style", style);
+    }
+    revealed.added.forEach(n => n.remove());
+    revealed = null;
   }
 
   // Results from a right-click file scan are shown in the same panel.
@@ -347,11 +443,10 @@
       reply({ shown: !!lastGroups.length }); return;
     }
     if (msg.type === "reveal") {
-      const els = lastGroups.flatMap(g => g.els).filter(Boolean);
-      const on = els.length && !els[0].classList.contains("parallax-reveal");
-      els.forEach(el => el.classList.toggle("parallax-reveal", on));
-      if (els[0] && on) els[0].scrollIntoView({ behavior: "smooth", block: "center" });
-      reply({ on }); return;
+      if (revealed) { hideAll(); rescan(); } else if (lastGroups.length) revealAll(lastGroups);
+      const btn = [...document.querySelectorAll("#parallax-panel .px-btn")].find(b => /Show on page|Hide again/.test(b.textContent));
+      if (btn) btn.textContent = revealed ? "Hide again" : "Show on page";
+      reply({ on: !!revealed }); return;
     }
     if (msg.type === "fileResult") {
       const r = msg.report;
@@ -367,7 +462,7 @@
   // feeds) would otherwise push the scan back forever.
   const rescan = () => { if (!timer) later(1200); };
   // Ignore changes we made ourselves (adding, editing or removing the panel).
-  const inPanel = n => n.nodeType === 1 && !!n.closest("#parallax-panel");
+  const inPanel = n => n.nodeType === 1 && !!n.closest("#parallax-panel, .parallax-label, .parallax-label-box");
   const isOurs = m => {
     const t = m.target.nodeType === 1 ? m.target : m.target.parentElement;
     if (t && inPanel(t)) return true;
