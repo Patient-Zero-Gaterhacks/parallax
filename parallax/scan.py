@@ -99,7 +99,10 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
     amounts alone, and facts inside collapsible UI or HTML comments raise a caution instead.
     Markup text (alt/title/aria/data-* attributes, hidden fields, meta tags, JSON-LD) is red only when a
     detector other than the fast model flags it; links/phones/prices there alone are info. A link whose
-    text shows one site but goes to another is red in emails and files, a caution on live pages."""
+    text shows one site but goes to another is red in emails and files, a caution on live pages.
+    Second pass (Gemma) runs only on spans the first pass reacted to; it flagging always upgrades. It saying
+    harmless clears a fast-model-only reaction: any such reaction on live pages, but in emails and files
+    (web=False) only a "maybe", never a fast-model flag."""
     seen_facts = facts(visible)
     # web: sites the page already shows (its own hostname, its links, visible text); a hidden link to one isn't new
     seen_sites = {_base(h) for h in _HOST.findall(visible.lower())} if web else set()
@@ -119,8 +122,11 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
         unicode = any("Unicode tag payload" in r for r in s.reasons)
         checks = [votes[d.name] for d in second if d.name in votes]
         cleared = set()
+        # live pages hide lots of harmless text, so there Gemma can cancel the fast model's flags; in emails and
+        # files it only clears the fast model's "maybe" (it's weak on subtle steering the fast model catches)
         if checks and all(not v.flagged and not getattr(v, "unsure", False) and not str(v.detail).startswith("error")
-                          for v in checks) and all(n in FAST_MODELS for n in reacted) and not new and not unicode:
+                          for v in checks) and all(n in FAST_MODELS for n in reacted) and not new and not unicode \
+                and (web or not any(votes[n].flagged for n in reacted)):
             cleared = set(reacted)   # the second pass says the fast model's hit was a false alarm
         flagged = [n for n, v in votes.items() if v.flagged and n not in cleared]
         if flagged:

@@ -1,6 +1,7 @@
 """The fine-tuned Gemma runs as a second pass: only on spans the fast detectors reacted to.
 
-It can confirm a span (strong vote) or clear one only the fast model reacted to. It can never clear a
+It can confirm a span (strong vote) or clear one only the fast model reacted to (on live pages any such
+reaction; in emails and files only the fast model's "maybe", not its flag). It can never clear a
 pattern hit, a hidden email/link/phone/amount or a Unicode tag payload, and an error changes nothing.
 Uses fake detectors: no models, no network.
 """
@@ -66,6 +67,16 @@ check("hidden email, Gemma clean -> not cleared", f.level == "threat" and any("b
 f = judge(TEXT, [Fake("patterns"), Fake("parallax-ml", flagged=True), gemma(detail="model 0.05")],
           reasons=["color:transparent", "Unicode tag payload"])
 check("Unicode tag payload, Gemma clean -> not cleared", f.level == "threat", f"{f.level} {f.why}")
+
+# Live pages vs emails/files: off the web, Gemma can only clear the fast model's "maybe", not its flag.
+f = judge(TEXT, [Fake("patterns"), Fake("parallax-ml", flagged=True), gemma(detail="model 0.05")], web=True)
+check("(a) web: fast flags, Gemma harmless -> cleared to info", f.level == "info", f"{f.level} {f.why}")
+f = judge(TEXT, [Fake("patterns"), Fake("parallax-ml", flagged=True), gemma(detail="model 0.05")], web=False)
+check("(b) email/file: fast flags, Gemma harmless -> still threat", f.level == "threat", f"{f.level} {f.why}")
+f = judge(TEXT, [Fake("patterns"), Fake("parallax-ml", unsure=True), gemma(detail="model 0.05")], web=False)
+check("(c) email/file: fast unsure, Gemma harmless -> cleared to info", f.level == "info", f"{f.level} {f.why}")
+f = judge(TEXT, [Fake("patterns"), Fake("parallax-ml", unsure=True), gemma(flagged=True, detail="model 0.97")], web=False)
+check("(d) email/file: fast unsure, Gemma flags -> threat", f.level == "threat", f"{f.level} {f.why}")
 
 for name, fast in [("unsure", Fake("parallax-ml", unsure=True)), ("flagged", Fake("parallax-ml", flagged=True))]:
     for web in (True, False):
