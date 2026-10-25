@@ -50,8 +50,9 @@ _PATTERNS = [
     (3, r"\b(you are|as an?) (an? )?(ai|assistant|language model|llm|agent|reviewer|screener)\b"),
     (3, r"\b(system prompt|developer message|new instructions?)\b"),
     (3, r"\b(note|message|instructions?|memo)\s+(to|for)\s+(?:\w+\s+){0,3}(ai|assistants?|llms?|models?|screeners?|reviewers?|agents?|bots?|copilots?)\b"),
-    # Addressing an AI directly by name or role ("Hey Gemini,", "Dear AI,", "Copilot, ...").
-    (3, r"(?:^|[.!?]\s+|\n)\s*(?:hey|hi|hello|dear|attention|attn|ok|okay)?[\s,]*(?:gemini|chatgpt|gpt|claude|copilot|siri|alexa|bard|ai|assistant|agent|bot|chatbot|(?:the\s+)?(?:language\s+)?model|llm)(?:\s+(?:agent|assistant|model|bot|system))?\b\s*(?:reading this|processing this)?\s*[,:!-]"),
+    # Addressing an AI directly by name or role ("Hey Gemini,", "Dear AI,", "Copilot, ...", "AI - send").
+    # A dash only counts with a space on both sides: "AI-Infused Curriculum" and "Agent-based" aren't addresses.
+    (3, r"(?:^|[.!?]\s+|\n)\s*(?:hey|hi|hello|dear|attention|attn|ok|okay)?[\s,]*(?:gemini|chatgpt|gpt|claude|copilot|siri|alexa|bard|ai|assistant|agent|bot|chatbot|(?:the\s+)?(?:language\s+)?model|llm)(?:\s+(?:agent|assistant|model|bot|system))?\b(?:\s*(?:reading this|processing this))?(?:\s*[,:!]|\s+[-–—](?=\s))"),
     # Attempts to replace the assistant's instructions.
     (3, r"\b(system|admin|developer|root)[\s-]+(override|mode|instructions?|prompt|command)\b|\byour\s+(new\s+)?(task|job|instructions?|goal|role)\s+(is|are|now)\b|\bstop following\b|\bdo what this (email|message|page|document|text) says\b|\bnew (objective|directive)\b"),
     # Text aimed at an automated evaluator (hiring, peer review, rankings).

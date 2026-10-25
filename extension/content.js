@@ -15,9 +15,15 @@
 
   // Offline fallback if the Parallax server isn't running.
   const LOCAL = /(ignore|disregard)\s+(all\s+|any\s+)?(previous|prior|above)\s+instructions|note\s+(to|for)\s+(the\s+)?(ai|assistant|screeners?|reviewers?|agents?)|\b(assistant|ai agent)\s*:|you are an ai|from now on/i;
-  const FACT = /[\w.+-]+@[\w-]+(\.[\w-]+)+|https?:\/\/\S+|(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g;  // amounts alone aren't strong evidence
+  // emails, full links (http(s):// or www.) and phone numbers; amounts and bare domains ("openai.com") alone aren't strong evidence
+  const FACT = /[\w.+-]+@[\w-]+(\.[\w-]+)+|https?:\/\/\S+|\bwww\.[^\s<>"')]+|(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g;
+  const HOST = /(?<![\w@.-])(?:[a-z0-9-]+\.)+[a-z]{2,}(?![\w-])/g;
+  const siteOf = link => D.baseDomain(link.toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split(/[/?#:]/)[0]);
   // Same rules as the server's web mode (parallax/scan.py _judge web=True): red only on strong evidence.
   function localJudge(spans, visible, ml) {
+    // sites the page already shows (its hostname, its links, visible text): a hidden link to one isn't new
+    const knownSites = new Set((visible.toLowerCase().match(HOST) || []).map(h => D.baseDomain(h)));
+    const sameSite = f => /^(https?:\/\/|www\.)/i.test(f) && knownSites.has(siteOf(f));
     return spans.map((s, i) => {
       const m = ml && ml[i];
       const ui = s.reasons.some(r => r.startsWith("collapsed UI"));
@@ -25,10 +31,11 @@
       // markup = alt/title/aria/data-* text, hidden fields, meta tags, JSON-LD: facts there alone are normal
       const markup = s.reasons.some(r => r.startsWith("markup:"));
       const mismatch = s.reasons.some(r => r.startsWith("markup: link text shows"));
-      const newFacts = (s.text.match(FACT) || []).filter(f => !visible.includes(f));
+      const newFacts = (s.text.match(FACT) || []).filter(f => !visible.includes(f) && !sameSite(f));
       const strong = [], weak = [];
       if (LOCAL.test(s.text)) strong.push("talks to an AI (offline check)");
       if (s.reasons.includes("Unicode tag payload")) strong.push("text smuggled in invisible Unicode");
+      // facts inside menus/carousels, comments (script/CDN links) or markup alone stay info
       if (newFacts.length && !ui && !comment && !markup) strong.push("adds hidden " + newFacts.slice(0, 3).join(", "));
       if (mismatch) weak.push("link text shows one site but goes to another");
       const label = markup && !mismatch && s.text.split(/\s+/).length < 12;   // short button/tooltip labels

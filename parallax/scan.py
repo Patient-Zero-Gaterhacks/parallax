@@ -29,7 +29,7 @@ from pathlib import Path
 from .detect import default_detectors
 from .gap.cloak import check_url
 from .gap.docx_gap import analyze_docx
-from .gap.html_gap import MARKUP, analyze_html
+from .gap.html_gap import MARKUP, _base, analyze_html
 from .gap.pdf_gap import analyze_pdf
 
 FACT_PATTERNS = {
@@ -51,6 +51,19 @@ def facts(text: str) -> dict[str, set]:
         else:
             out[kind] = {v.lower().rstrip(".,") for v in re.findall(pat, text)}
     return out
+
+
+_HOST = re.compile(r"(?<![\w@.-])(?:[a-z0-9-]+\.)+[a-z]{2,}(?![\w-])")
+
+
+def _site(link: str) -> str:
+    """Registrable domain of a link or bare domain: https://www.npr.org/player/x -> npr.org."""
+    host = re.sub(r"^[a-z][a-z0-9+.-]*://", "", link.lower())
+    return _base(re.split(r"[/?#:]", host, 1)[0])
+
+
+def _full_link(link: str) -> bool:
+    return link.startswith(("http://", "https://", "www."))
 
 
 @dataclass
@@ -88,7 +101,9 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
     detector other than the fast model flags it; links/phones/prices there alone are info. A link whose
     text shows one site but goes to another is red in emails and files, a caution on live pages."""
     seen_facts = facts(visible)
-    first = [d for d in detectors if not getattr(d, "second_pass", False)]
+    # web: sites the page already shows (its own hostname, its links, visible text); a hidden link to one isn't new
+    seen_sites = {_base(h) for h in _HOST.findall(visible.lower())} if web else set()
+    first =[d for d in detectors if not getattr(d, "second_pass", False)]
     second = [d for d in detectors if getattr(d, "second_pass", False)]
     out = []
     for s in spans:
@@ -98,6 +113,8 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
         if reacted:   # slow models (Gemma) only look at what the first pass reacted to
             votes.update({d.name: d(s.text) for d in second})
         new = {k: v - seen_facts[k] for k, v in facts(s.text).items()}
+        if web:   # only full links count, and only to sites the page doesn't already show ("openai.com" alone is a logo name)
+            new["link"] = {u for u in new["link"] if _full_link(u) and _site(u) not in seen_sites}
         new = {k: v for k, v in new.items() if v}
         unicode = any("Unicode tag payload" in r for r in s.reasons)
         checks = [votes[d.name] for d in second if d.name in votes]
@@ -139,8 +156,9 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
                 strong = False   # on live pages a lookalike link is a caution (redirect/tracking links are common)
         ui_facts_only = web and why and not flagged and any("collapsed UI" in r for r in s.reasons) \
             and not unicode
+        # web: comments listing script/CDN links are build leftovers, not a message
         ui_facts_only = ui_facts_only or (markup and not mismatch and why and not flagged and not unicode) \
-            or (web and markup_label)
+            or (web and markup_label) or (web and is_comment and why and not flagged and not unicode)
         if why and strong:
             level = "threat"
         elif ui_facts_only:

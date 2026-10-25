@@ -84,7 +84,10 @@
 
   // Hidden text inside menus, dialogs, tabs, accordions and tooltips is UI the user can open.
   const UI_HIDDEN = "nav, header, footer, details, dialog, [role=menu], [role=menubar], [role=dialog], [role=tabpanel], " +
-    "[role=tooltip], [role=listbox], [aria-modal=true], .modal, .dropdown, .menu, .tooltip, .tab-pane, .accordion, .collapse";
+    "[role=tooltip], [role=listbox], [aria-modal=true], .modal, .dropdown, .menu, .tooltip, .tab-pane, .accordion, .collapse, " +
+    // carousel/slider slides that aren't showing right now
+    "[aria-roledescription=slide], [aria-roledescription=carousel], .carousel, .carousel-item, .slider, .slide, .swiper, " +
+    ".swiper-slide, .slick-slide, .splide__slide, .glide__slide, .flickity-slider";
   function isCollapsibleUI(el) {
     if (el.closest(UI_HIDDEN) || el.closest("[hidden]")) return true;
     for (let a = el; a && a.nodeType === 1; a = a.parentElement) {
@@ -270,6 +273,6 @@
     return { hidden, visible: visibleText };
   }
 
-  const api = { assess, scanDocument, markupSpans, sentenceLike, contrast, parseRGB, toRGBA, tagPayload, isCollapsibleUI };
+  const api = { assess, scanDocument, markupSpans, sentenceLike, contrast, parseRGB, toRGBA, tagPayload, isCollapsibleUI, baseDomain };
   if (typeof module !== "undefined") module.exports = api; else root.ParallaxDetect = api;
 })(this);
