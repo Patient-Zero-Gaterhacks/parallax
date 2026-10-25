@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+/* Our fonts and the two map colors. Each one becomes a Tailwind class:
+   --color-safe -> bg-safe, text-safe, border-safe; --font-mono -> font-mono.
+   Grays come from Tailwind's built-in neutral palette (neutral-400, neutral-800, ...). */
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --color-safe: #3d7eff;     /* blocked by Parallax */
+  --color-infected: #ff4d5e; /* reached an AI with no protection */
+}
+
+/* A visible outline for keyboard users on every link and button. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid #808080;
+    outline-offset: 3px;
+  }
+}
