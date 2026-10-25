@@ -144,7 +144,16 @@
     lastSpans = hidden.filter(h => { const k = h.text.slice(0, 200); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 200);
     const spans = lastSpans;
     const links = [...document.querySelectorAll("a[href]")].map(a => a.getAttribute("href").replace(/^(mailto|tel):/i, "")).join(" ");
-    const known = [location.hostname, links, visible].join(" ");
+    // Labels the user sees too: the tab title, and aria-label/title of visible elements (Google's account
+    // button shows your email this way while a hidden copy sits in the page). Only visible elements count,
+    // so a hidden label still gets judged. Capped to stay fast, and placed before the long text so the
+    // 40000-character cut below never drops them.
+    const labels = new Set([document.title]);
+    for (const el of [...document.querySelectorAll("[aria-label], [title]")].slice(0, 500)) {
+      if (!el.checkVisibility || !el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
+      labels.add(el.getAttribute("aria-label") || ""); labels.add(el.getAttribute("title") || "");
+    }
+    const known = [location.hostname, [...labels].join(" ").slice(0, 10000), links, visible].join(" ");
     const payload = { spans: lastSpans.map(h => ({ text: h.text.slice(0, 2000), reasons: h.reasons })),
                       visible: known.slice(0, 40000), context: "web" };
     const key = spansKey(payload.spans);

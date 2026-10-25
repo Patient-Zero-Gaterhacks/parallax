@@ -65,6 +65,31 @@ async function content() {
   dom.window.close();
 }
 
+async function labels() {
+  const dom = new JSDOM('<!doctype html><title>Inbox - me@gmail.com</title><body>' +
+    '<button aria-label="Account: me@gmail.com">M</button><div hidden aria-label="evil@attacker.com"></div></body>',
+    { url: 'https://mail.google.com', runScripts: 'outside-only' });
+  const w = dom.window, sent = [];
+  // jsdom has no checkVisibility; treat elements with the hidden attribute as invisible
+  w.Element.prototype.checkVisibility = function () { return !this.closest('[hidden]'); };
+  w.chrome = {
+    storage: { local: { get: async () => ({}) }, onChanged: { addListener: () => {} } },
+    runtime: { onMessage: { addListener: () => {} }, sendMessage: async msg => {
+      if (msg.type === 'classify') { sent.push(msg.payload); return new Promise(() => {}); }
+    } }
+  };
+  const spans = [{ text: 'me@gmail.com', reasons: ['display:none'], el: w.document.body }];
+  w.ParallaxDetect = { scanDocument: () => ({ hidden: spans, visible: 'x'.repeat(50000) }), baseDomain: x => x };
+  w.eval(source('content.js'));
+  await tick();
+  const visible = sent[0].visible;
+  assert(visible.includes('Inbox - me@gmail.com'), 'page title counts as visible');
+  assert(visible.includes('Account: me@gmail.com'), 'aria-label of a visible element counts, even on long pages');
+  assert(!visible.includes('evil@attacker.com'), 'aria-label of a hidden element does not');
+  assert(visible.length <= 40000);
+  dom.window.close();
+}
+
 async function popup(tab, verdict) {
   const dom = new JSDOM(source('popup.html'), { url: 'https://extension.test/popup.html', runScripts: 'outside-only' });
   const w = dom.window, opened = [], local = {}, changed = [];
@@ -98,6 +123,7 @@ async function popup(tab, verdict) {
   for (const icon of Object.values(manifest.icons)) assert(fs.existsSync(path.join(root, icon)));
   console.log('[PASS] offline false-alarm regressions, hidden instruction detection, icon paths');
   await content(); console.log('[PASS] alerts, all findings, reveal, pause/resume, stale scan rejection, caution details');
+  await labels(); console.log('[PASS] visible labels and page title count as visible, hidden labels do not');
   let p = await popup({ id: 1, url: 'https://example.org' }, { verdict: 'threat', count: 2, top: 'Hidden instructions', gemma: true });
   assert.equal(p.w.document.getElementById('title').textContent, '2 hidden messages');
   assert.equal(p.w.document.getElementById('found').hidden, false);
