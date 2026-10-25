@@ -316,7 +316,10 @@
   });
 
   let timer = null;
-  const rescan = () => { clearTimeout(timer); timer = setTimeout(scan, 1200); };
+  const later = ms => { clearTimeout(timer); timer = setTimeout(() => { timer = null; scan(); }, ms); };
+  // At most one scan per 1.2 s. Not a resetting debounce: pages that never stop changing (animations,
+  // feeds) would otherwise push the scan back forever.
+  const rescan = () => { if (!timer) later(1200); };
   // Ignore changes we made ourselves (adding, editing or removing the panel).
   const inPanel = n => n.nodeType === 1 && !!n.closest("#parallax-panel");
   const isOurs = m => {
@@ -330,7 +333,7 @@
   }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   chrome.storage.onChanged.addListener(ch => { if (ch.paused) { lastKey = null; dismissedKey = null; scan(); } });
   // SPA route changes: rescan soon (scan() clears the old page's result first).
-  const soon = () => { clearTimeout(timer); timer = setTimeout(scan, 200); };
+  const soon = () => later(200);
   addEventListener("hashchange", soon);
   addEventListener("popstate", soon);
   // Back/Forward can restore this page from cache: tell the badge again what this page has.
