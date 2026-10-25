@@ -209,7 +209,8 @@
   let lastVerdict = null;   // what the popup shows, so the badge, popup and page always agree
   let lastGroups = [];
   let lastKey = null;       // don't redraw (or re-animate) when a rescan finds the same thing
-  const byGemma = g => (g.why || []).some(w => /^talks to an AI \([^)]*gemma/i.test(w));
+  // our fine-tuned Gemma reports as "parallax-transformer"; the untrained one as "gemma-4"
+  const byGemma = g => (g.why || []).some(w => /^talks to an AI \([^)]*(gemma|parallax-transformer)/i.test(w));
 
   // Quiet by default. A real threat shows a small pill in the corner that shrinks to a dot;
   // clicking it opens a short card. Anything less serious only changes the toolbar badge.
@@ -217,7 +218,10 @@
     let root = document.getElementById("parallax-panel");
     const show = threats.length || (opts.force && cautions.length);
     if (!show) { root && root.remove(); lastKey = null; return; }
-    const key = keyOf(threats, cautions) + (opts.title || "");
+    // Include levels and reasons: when the server's answer replaces the quick offline verdict for the same
+    // hidden text, the card must redraw (otherwise it keeps "offline check" and never shows "Confirmed by Gemma").
+    const key = keyOf(threats, cautions) + (opts.title || "") +
+      JSON.stringify(threats.concat(cautions).map(f => [f.level, f.why || []]));
     if (root && key === lastKey && !opts.force) return;
     lastKey = key;
     const groups = merge(threats.concat(cautions));
