@@ -44,9 +44,10 @@ def verify(label, spans, visible, web):
     found = _judge([HiddenSpan(s["text"], s["reasons"]) for s in spans], visible, DETS,
                    long_passage_caution=not web, web=web)
     lv = {a: next((f.level for f in found if marker(a) in f.text), None) for a in ATTACKS}
-    # a lookalike link alone: a caution in emails/files, info on live pages (real sites are full of
-    # redirect and tracking links); it's still found, and any detector flag on it escalates
-    want_link = "info" if web else "caution"
+    # a lookalike link alone is a caution in emails/files and info on live pages (real sites are full of redirect
+    # and tracking links), except that text claiming a commonly impersonated brand (this one shows paypal.com) is a
+    # caution there too; any detector flag on it escalates
+    want_link = "caution"
     bad = {a: l for a, l in lv.items() if l != (want_link if a == "l1" else "threat")}
     check(f"{label}: every attack judged threat (lookalike link: {want_link})", not bad, str(bad))
     noise = [(f.level, f.text[:50]) for f in found

@@ -67,6 +67,23 @@ def _full_link(link: str) -> bool:
     return link.startswith(("http://", "https://", "www."))
 
 
+# Brands phishing pages most often pretend to be. On live pages a look-alike link alone is info (sites are full
+# of redirect and tracking links), but visible text claiming one of these while the link goes elsewhere is a caution.
+BRANDS = {"paypal", "apple", "icloud", "google", "gmail", "microsoft", "office", "outlook", "live", "amazon", "netflix",
+          "facebook", "instagram", "whatsapp", "meta", "linkedin", "twitter", "x", "chase", "wellsfargo", "bankofamerica",
+          "citi", "capitalone", "americanexpress", "amex", "coinbase", "binance", "venmo", "zelle", "cashapp", "stripe",
+          "dropbox", "docusign", "adobe", "fedex", "ups", "usps", "dhl", "irs", "ebay", "walmart", "steam", "discord"}
+_SHOWN = re.compile(r"link text shows (\S+) but goes to")
+
+
+def _impersonates(reasons) -> bool:
+    for r in reasons:
+        m = _SHOWN.search(r)
+        if m and _base(m.group(1)).split(".")[0] in BRANDS:
+            return True
+    return False
+
+
 @dataclass
 class Finding:
     text: str
@@ -101,7 +118,8 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
     Markup text (alt/title/aria/data-* attributes, hidden fields, meta tags, JSON-LD) is red only when a
     detector other than the fast model flags it; links/phones/prices there alone are info, and on live
     pages so is a fast-model-only flag. A link whose visible text is one site's address but goes to another
-    is a caution in emails and files (red only with another strong signal) and info alone on live pages.
+    is a caution in emails and files (red only with another strong signal); on live pages it's info alone,
+    or a caution when the text claims a commonly impersonated brand (paypal.com, apple.com, a bank).
     HTML comments: only facts -> info; only the fast model -> caution in emails/files, info on live pages;
     patterns or Gemma -> threat.
     Second pass (Gemma) runs only on spans the first pass reacted to; it flagging always upgrades. It saying
@@ -142,6 +160,7 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
             why.append("text smuggled in invisible Unicode")
         markup = any(r.startswith(MARKUP) for r in s.reasons)   # alt/aria/data-*/JSON-LD/meta/link text
         mismatch = markup and any("link text shows" in r for r in s.reasons)
+        brand = mismatch and _impersonates(s.reasons)   # "paypal.com" text going elsewhere: classic phishing
         if mismatch:
             why.append("link text shows one site but goes to another")
         long_hidden = long_passage_caution and len(s.text.split()) >= 25 and not markup
@@ -170,7 +189,7 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
         ui_facts_only = web and why and not flagged and any("collapsed UI" in r for r in s.reasons) \
             and not unicode
         ui_facts_only = ui_facts_only or (markup and not mismatch and why and not flagged and not unicode) \
-            or (web and markup_label) or (web and mismatch and not flagged and not unicode)
+            or (web and markup_label) or (web and mismatch and not brand and not flagged and not unicode)
         if why and strong:
             level = "threat"
         elif ui_facts_only:

@@ -20,6 +20,12 @@
   const FACT = /[\w.+-]+@[\w-]+(\.[\w-]+)+|https?:\/\/\S+|\bwww\.[^\s<>"')]+|(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g;
   const HOST = /(?<![\w@.-])(?:[a-z0-9-]+\.)+[a-z]{2,}(?![\w-])/g;
   // "salon.com2020" (share text that lost its "/") counts as salon.com
+  // Brands phishing pages most often pretend to be (same list as parallax/scan.py): a look-alike link alone is
+  // info, but visible text claiming one of these while the link goes elsewhere is a caution.
+  const BRANDS = new Set(["paypal", "apple", "icloud", "google", "gmail", "microsoft", "office", "outlook", "live", "amazon",
+    "netflix", "facebook", "instagram", "whatsapp", "meta", "linkedin", "twitter", "x", "chase", "wellsfargo", "bankofamerica",
+    "citi", "capitalone", "americanexpress", "amex", "coinbase", "binance", "venmo", "zelle", "cashapp", "stripe", "dropbox",
+    "docusign", "adobe", "fedex", "ups", "usps", "dhl", "irs", "ebay", "walmart", "steam", "discord"]);
   const siteOf = link => D.baseDomain(link.toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split(/[/?#:]/)[0].replace(/(?<=[a-z])\d+$/, ""));
   // Same rules as the server's web mode (parallax/scan.py _judge web=True): red only on strong evidence.
   function localJudge(spans, visible, ml) {
@@ -38,6 +44,8 @@
       if (s.reasons.includes("Unicode tag payload")) strong.push("text smuggled in invisible Unicode");
       // facts inside menus/carousels, comments (script/CDN links) or markup alone stay info
       if (newFacts.length && !ui && !comment && !markup) strong.push("adds hidden " + newFacts.slice(0, 3).join(", "));
+      const shown = s.reasons.map(r => /link text shows (\S+) but goes to/.exec(r)).find(Boolean);
+      if (shown && BRANDS.has(D.baseDomain(shown[1]).split(".")[0])) weak.push("link text shows one site but goes to another");
       // a lookalike link alone, or the built-in model alone on markup text or a comment, stays info on web pages
       if (m && m.level === "sure" && !markup && !comment) weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
       else if (m && m.level === "maybe" && !ui && !markup && !comment) weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);

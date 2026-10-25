@@ -1,7 +1,8 @@
 """The website's "Am I protected?" playground (/#try) with the REAL extension, and without it.
 
-With the extension: the banner turns green, every hidden-attack trap reaches "Caught" (except the look-alike
-link, a known miss: on live pages a look-alike link alone is info) and the control card stays "No false alarm".
+With the extension: the banner turns green, every hidden-attack trap reaches "Caught" and the control card stays
+"No false alarm". With an older extension loaded (from before the page hook), the banner says it needs a reload
+instead of "not installed".
 Without it (plain Chromium): the banner is red and the no-install panel scans the attack lab's resume.pdf as a
 threat. Serves frontend/dist from the real API server (uvicorn), building it if
 needed. Needs Playwright + Chromium; skips otherwise.
@@ -80,14 +81,8 @@ try:
             banner = pg.query_selector("[data-testid=banner]")
             check("with the extension: banner is green (protected)", banner and banner.get_attribute("data-status") == "on",
                   (banner.text_content() or "")[:90] if banner else "")
-            # KNOWN MISS, shown as "Missed" on the page: on live pages a look-alike link alone is info, not a
-            # caution (real sites are full of redirect/tracking links), so the extension doesn't report it.
-            KNOWN_MISS = {"PX-TRAP-09"}
             for code, chip in sorted(c.items()):
-                if code in KNOWN_MISS:
-                    check(f"trap {code} (look-alike link): known miss, shown as Missed", chip == "Missed", f"({chip})")
-                    print(f"   [KNOWN MISS] {code}: a look-alike link alone is info on live pages, so it isn't reported")
-                elif code != "PX-CONTROL":
+                if code != "PX-CONTROL":
                     check(f"trap {code} caught", chip.startswith("Caught"), f"({chip})")
             check("control card: no false alarm", c.get("PX-CONTROL") == "No false alarm", f"({c.get('PX-CONTROL')})")
             print("   scoreboard:", pg.text_content("[data-testid=scoreboard]"))
@@ -95,6 +90,30 @@ try:
                   pg.evaluate("""async () => { location.hash = ''; await new Promise(r => setTimeout(r, 300));
                     return !document.querySelector('meta[name=parallax-playground]') && document.documentElement.dataset.parallax === 'on'; }"""))
             ctx.close()
+
+        # ---- an older extension, loaded before the playground hook existed ----
+        old_ext = Path(tmp, "old-extension")
+        old_ext.mkdir()
+        arch = subprocess.run(["git", "archive", "5286865", "extension"], cwd=ROOT, capture_output=True)
+        if arch.returncode == 0:
+            subprocess.run(["tar", "x", "-C", str(old_ext)], input=arch.stdout, check=True)
+            octx = p.chromium.launch_persistent_context(str(Path(tmp, "old-profile")), headless=True, channel="chromium",
+                args=[f"--disable-extensions-except={old_ext / 'extension'}", f"--load-extension={old_ext / 'extension'}"])
+            osw = octx.service_workers[0] if octx.service_workers else octx.wait_for_event("serviceworker", timeout=10000)
+            oh = octx.new_page(); oh.goto(f"chrome-extension://{osw.url.split('/')[2]}/scan.html")
+            oh.evaluate("async u => chrome.storage.local.set({ server: u })", BASE)
+            opg = octx.pages[0]; opg.goto(BASE + "/#try")
+            status = None
+            for _ in range(30):
+                opg.wait_for_timeout(500)
+                status = opg.get_attribute("[data-testid=banner]", "data-status")
+                if status not in (None, "checking"):
+                    break
+            check("older extension (no page hook yet): banner says reload, not 'not installed'", status == "outdated",
+                  f"({status}) {(opg.text_content('[data-testid=banner]') or '')[:70]}")
+            octx.close()
+        else:
+            print("[SKIP] older-extension check: git history not available")
 
         # ---- without the extension ----
         b = p.chromium.launch()
