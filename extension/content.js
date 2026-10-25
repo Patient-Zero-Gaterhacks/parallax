@@ -191,17 +191,6 @@
     return "hidden from you";
   }
 
-  // What the hidden text does, in plain words.
-  function what(why) {
-    const w = (why || []).join(" ");
-    if (/talks to an AI/.test(w)) return "Written for an AI assistant";
-    if (/invisible Unicode/.test(w)) return "Smuggled in invisible characters";
-    const fact = /hidden (email address|link|phone number|amount)/.exec(w) || (/adds hidden/.test(w) && [0, "link or address"]);
-    if (fact) return `Adds a hidden ${fact[1]}`;
-    if (/link text shows/.test(w)) return "A link that goes somewhere other than it says";
-    return "Might be aimed at an AI";
-  }
-
   // Pieces of one hidden message often arrive as several text nodes (one per line).
   // Join neighbours that were hidden the same way so the panel shows one message.
   function merge(findings) {
@@ -254,7 +243,7 @@
   }
 
   function openCard(root, d) {
-    const n = d.groups.filter(g => g.level === "threat").length || d.groups.length, top = d.groups[0];
+    const n = d.groups.filter(g => g.level === "threat").length || d.groups.length;
     root.innerHTML = "";
     const card = document.createElement("div"); card.className = "px-card";
 
@@ -269,25 +258,24 @@
     const sub = document.createElement("div"); sub.className = "px-sub";
     sub.textContent = d.isThreat ? "Suspicious text hidden on this page could affect an AI assistant."
                                  : "This page has text you can't see. It's probably harmless.";
-    const quote = document.createElement("div"); quote.className = "px-quote"; quote.textContent = top.text.slice(0, 280);
-    card.append(head, status, sub, quote);
+    card.append(head, status, sub);
 
-    const details = document.createElement("details"); details.className = "px-details";
-    const summary = document.createElement("summary"); summary.textContent = "Review all findings";
-    details.append(summary);
+    // Every hidden message, each with how it was hidden in plain words; long lists scroll inside the card.
+    const list = document.createElement("div"); list.className = "px-list";
     for (const g of d.groups) {
-      const item = document.createElement("div"); item.className = "px-detail";
-      const text = document.createElement("p"); text.textContent = g.text;
-      const reason = document.createElement("p"); reason.className = "px-sub";
-      reason.textContent = (g.level === "threat" ? "Threat · " : "Caution · ") + what(g.why) + " · " + how(g.where) + ". " + g.why.join("; ");
-      item.append(text, reason); details.append(item);
+      const item = document.createElement("div"); item.className = "px-item";
+      const quote = document.createElement("div"); quote.className = "px-quote"; quote.textContent = g.text.slice(0, 280);
+      const hiddenHow = how(g.where);
+      const note = document.createElement("div"); note.className = "px-sub"; note.textContent = hiddenHow[0].toUpperCase() + hiddenHow.slice(1);
+      item.append(quote, note); list.append(item);
     }
-    card.append(details);
+    card.append(list);
 
-    const tags = document.createElement("div"); tags.className = "px-tags";
-    if (d.groups.some(byGemma)) { const t = document.createElement("span"); t.className = "px-tag px-gemma"; t.textContent = "Confirmed by Gemma"; tags.append(t); }
-    if (d.groups.length > 1) { const t = document.createElement("span"); t.className = "px-tag"; t.textContent = `+${d.groups.length - 1} more`; tags.append(t); }
-    if (tags.childNodes.length) card.append(tags);
+    if (d.groups.some(byGemma)) {
+      const tags = document.createElement("div"); tags.className = "px-tags";
+      const t = document.createElement("span"); t.className = "px-tag px-gemma"; t.textContent = "Confirmed by Gemma";
+      tags.append(t); card.append(tags);
+    }
 
     const btns = document.createElement("div"); btns.className = "px-btns";
     const els = d.groups.flatMap(g => g.els).filter(Boolean);

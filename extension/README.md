@@ -33,8 +33,8 @@ right-click file scanning remain available.
   offline classifier, current models and backend routes.
 - Preserved scan.html, scan.js and server.js; did not import the ZIP's older
   detector or replace the backend or website frontend.
-- Grouped only fragments from the same element. Review all findings exposes
-  messages and reasons, including cautions alongside threats.
+- Grouped only fragments from the same element. The card lists every hidden
+  message with how it was hidden, including cautions alongside threats.
 - Discarded stale asynchronous scan responses after pause/resume or newer scans.
 - Gemma confirmation is shown only for a positive Gemma instruction vote.
 

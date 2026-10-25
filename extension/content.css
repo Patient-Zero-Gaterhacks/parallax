@@ -61,7 +61,6 @@
   outline: 2px dashed #b42318 !important; max-height: none !important; overflow: visible !important; text-indent: 0 !important; }
 
 #parallax-panel .px-card { max-height: calc(100vh - 40px); overflow: auto; }
-#parallax-panel .px-details { margin-top: 10px; color: #a3a3a3; font-size: 12px; }
-#parallax-panel summary { cursor: pointer; }
-#parallax-panel .px-detail { border-top: 1px solid #2e2e2e; margin-top: 8px; padding-top: 6px; overflow-wrap: anywhere; }
-#parallax-panel .px-detail p { margin: 4px 0; white-space: pre-wrap; }
+#parallax-panel .px-list { margin-top: 10px; max-height: 260px; overflow-y: auto; }
+#parallax-panel .px-item + .px-item { margin-top: 12px; }
+#parallax-panel .px-list .px-quote { margin-top: 0; }

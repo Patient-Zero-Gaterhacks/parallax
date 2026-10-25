@@ -45,7 +45,12 @@ async function content() {
   requests.shift().resolve(response('threat')); await tick();
   assert(w.document.querySelector('.px-pill'), 'threat produces compact alert');
   await message({ type: 'details' });
-  assert.equal(w.document.querySelectorAll('.px-detail').length, 2, 'card exposes every finding');
+  const items = [...w.document.querySelectorAll('.px-item')];
+  assert.equal(items.length, 2, 'card lists every finding');
+  spans.forEach((s, i) => assert.equal(items[i].querySelector('.px-quote').textContent, s.text, 'each finding shows its hidden text'));
+  assert(items.every(el => el.querySelector('.px-sub').textContent === 'Hidden on the page'), 'each finding says how it was hidden');
+  assert.equal(w.document.querySelector('details'), null, 'no "Review all findings" block');
+  assert(!w.document.querySelector('#parallax-panel').textContent.includes('more'), 'no "+N more" tag');
   assert.equal((await message({ type: 'reveal' })).on, true);
   assert.equal(w.document.querySelectorAll('.parallax-reveal').length, 2);
   paused = ['example.org']; changes[0]({ paused: {} }); await tick();
@@ -61,7 +66,7 @@ async function content() {
   requests.shift().resolve(response('caution')); await tick();
   assert.equal(w.document.querySelector('#parallax-panel'), null, 'cautions stay quiet');
   await message({ type: 'details' });
-  assert.equal(w.document.querySelectorAll('.px-detail').length, 2, 'cautions available on request');
+  assert.equal(w.document.querySelectorAll('.px-item').length, 2, 'cautions listed on the card on request');
   dom.window.close();
 }
 
