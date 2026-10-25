@@ -63,6 +63,7 @@ Hidden text:
 
 class GemmaDetector:
     name = "gemma-4"
+    second_pass = True   # slow: scan.py only asks it about spans the fast detectors reacted to
 
     def __init__(self, model: str = "gemma-4-31b-it", client=None):
         if client is None:
@@ -178,6 +179,7 @@ class TransformerDetector:
     """A fine-tuned model from ml/train_transformer.py (e.g. Gemma). Runs on CPU or GPU.
     `path` is a model folder or a Hugging Face repo id."""
     name = "parallax-transformer"
+    second_pass = True   # slow: scan.py only asks it about spans the fast detectors reacted to
     SURE, MAYBE = 0.85, 0.5
 
     def __init__(self, path: str):

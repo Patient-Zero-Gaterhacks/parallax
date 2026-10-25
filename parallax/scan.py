@@ -85,21 +85,32 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
     smuggling, or a hidden email/link/phone outside menus, tabs and dialogs. The fast model alone,
     amounts alone, and facts inside collapsible UI or HTML comments raise a caution instead."""
     seen_facts = facts(visible)
+    first = [d for d in detectors if not getattr(d, "second_pass", False)]
+    second = [d for d in detectors if getattr(d, "second_pass", False)]
     out = []
     for s in spans:
         why = []
-        votes = {d.name: d(s.text) for d in detectors} if s.text.strip() else {}
-        flagged = [n for n, v in votes.items() if v.flagged]
-        if flagged:
-            why.append("talks to an AI (" + ", ".join(flagged) + ")")
+        votes = {d.name: d(s.text) for d in first} if s.text.strip() else {}
+        reacted = [n for n, v in votes.items() if v.flagged or getattr(v, "unsure", False)]
+        if reacted:   # slow models (Gemma) only look at what the first pass reacted to
+            votes.update({d.name: d(s.text) for d in second})
         new = {k: v - seen_facts[k] for k, v in facts(s.text).items()}
         new = {k: v for k, v in new.items() if v}
+        unicode = any("Unicode tag payload" in r for r in s.reasons)
+        checks = [votes[d.name] for d in second if d.name in votes]
+        cleared = set()
+        if checks and all(not v.flagged and not getattr(v, "unsure", False) and not str(v.detail).startswith("error")
+                          for v in checks) and all(n in FAST_MODELS for n in reacted) and not new and not unicode:
+            cleared = set(reacted)   # the second pass says the fast model's hit was a false alarm
+        flagged = [n for n, v in votes.items() if v.flagged and n not in cleared]
+        if flagged:
+            why.append("talks to an AI (" + ", ".join(flagged) + ")")
         for k, v in new.items():
             why.append(f"adds a hidden {k}: {', '.join(sorted(v))}")
-        if any("Unicode tag payload" in r for r in s.reasons):
+        if unicode:
             why.append("text smuggled in invisible Unicode")
         long_hidden = long_passage_caution and len(s.text.split()) >= 25
-        unsure = [n for n, v in votes.items() if getattr(v, "unsure", False)]
+        unsure = [n for n, v in votes.items() if getattr(v, "unsure", False) and n not in cleared]
         is_comment = any("comment" in r.lower() for r in s.reasons)
         if web and any("collapsed UI" in r for r in s.reasons) and not flagged and not new:
             unsure = []   # menus, tabs and dialogs: a "maybe" from a model isn't worth a warning
