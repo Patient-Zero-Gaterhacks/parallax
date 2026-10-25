@@ -94,7 +94,7 @@ async def scan_file_ep(file: UploadFile = File(...)):
 @app.post("/classify")
 def classify(body: ClassifyIn):
     spans = [HiddenSpan(s.text, s.reasons) for s in body.spans[:200]]
-    found = _judge(spans, body.visible, DETECTORS, long_passage_caution=(body.context != "web"))
+    found = _judge(spans, body.visible, DETECTORS, long_passage_caution=(body.context != "web"), web=(body.context == "web"))
     return {"findings": [f.__dict__ for f in found]}
 
 

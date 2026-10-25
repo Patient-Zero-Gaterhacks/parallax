@@ -15,20 +15,23 @@
 
   // Offline fallback if the Parallax server isn't running.
   const LOCAL = /(ignore|disregard)\s+(all\s+|any\s+)?(previous|prior|above)\s+instructions|note\s+(to|for)\s+(the\s+)?(ai|assistant|screeners?|reviewers?|agents?)|\b(assistant|ai agent)\s*:|you are an ai|from now on/i;
-  const FACT = /[\w.+-]+@[\w-]+(\.[\w-]+)+|https?:\/\/\S+|\$\s?[\d,]+(\.\d\d)?/g;
+  const FACT = /[\w.+-]+@[\w-]+(\.[\w-]+)+|https?:\/\/\S+|(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g;  // amounts alone aren't strong evidence
+  // Same rules as the server's web mode (parallax/scan.py _judge web=True): red only on strong evidence.
   function localJudge(spans, visible, ml) {
     return spans.map((s, i) => {
       const m = ml && ml[i];
+      const ui = s.reasons.some(r => r.startsWith("collapsed UI"));
+      const comment = s.reasons.includes("HTML comment");
       const newFacts = (s.text.match(FACT) || []).filter(f => !visible.includes(f));
-      const why = [];
-      if (LOCAL.test(s.text)) why.push("talks to an AI (offline check)");
-      if (m && m.level === "sure") why.push(`talks to an AI (parallax-ml ${m.score.toFixed(2)})`);
-      if (newFacts.length) why.push("adds hidden " + newFacts.slice(0, 3).join(", "));
-      if (s.reasons.includes("Unicode tag payload")) why.push("text smuggled in invisible Unicode");
-      if (!why.length && m && m.level === "maybe") {
-        return { text: s.text, where: s.reasons, level: "caution", why: [`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`] };
-      }
-      return { text: s.text, where: s.reasons, level: why.length ? "threat" : "info", why };
+      const strong = [], weak = [];
+      if (LOCAL.test(s.text)) strong.push("talks to an AI (offline check)");
+      if (s.reasons.includes("Unicode tag payload")) strong.push("text smuggled in invisible Unicode");
+      if (newFacts.length && !ui && !comment) strong.push("adds hidden " + newFacts.slice(0, 3).join(", "));
+      if (m && m.level === "sure") weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
+      else if (m && m.level === "maybe" && !ui) weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
+      if (strong.length) return { text: s.text, where: s.reasons, level: "threat", why: strong.concat(weak) };
+      if (weak.length) return { text: s.text, where: s.reasons, level: "caution", why: weak };
+      return { text: s.text, where: s.reasons, level: "info", why: [] };
     });
   }
 
@@ -42,8 +45,10 @@
     // Collapse duplicates and keep the request small.
     const seen = new Set();
     lastSpans = hidden.filter(h => { const k = h.text.slice(0, 200); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 200);
+    const links = [...document.querySelectorAll("a[href]")].map(a => a.getAttribute("href").replace(/^(mailto|tel):/i, "")).join(" ");
+    const known = [location.hostname, links, visible].join(" ");
     const payload = { spans: lastSpans.map(h => ({ text: h.text.slice(0, 2000), reasons: h.reasons })),
-                      visible: visible.slice(0, 20000), context: "web" };
+                      visible: known.slice(0, 40000), context: "web" };
     let findings;
     try {
       const res = await chrome.runtime.sendMessage({ type: "classify", payload });

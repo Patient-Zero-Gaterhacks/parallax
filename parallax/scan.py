@@ -36,7 +36,9 @@ FACT_PATTERNS = {
     "email address": r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+",
     "link": r"https?://[^\s<>\"')]+|\bwww\.[^\s<>\"')]+|\b[a-z0-9][a-z0-9-]{2,}\.(?:com|net|org|io|co|info|biz|xyz|app|online|site|top|us)\b",
     "amount": r"\$\s?[\d,]+(?:\.\d\d)?",
-    "phone number": r"\+?\d[\d\-\s().]{8,}\d",
+    # needs phone-like grouping (555-555-0199, (555) 555 0199, +1 555.555.0199); bare digit runs such as
+    # dates or build numbers ("20261024") are not phone numbers
+    "phone number": r"(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b",
 }
 
 
@@ -74,7 +76,14 @@ class Report:
         return asdict(self)
 
 
-def _judge(spans, visible: str, detectors, long_passage_caution: bool = True) -> list[Finding]:
+FAST_MODELS = {"parallax-ml"}   # quick word-based models: on web pages they only raise a caution alone
+
+
+def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, web: bool = False) -> list[Finding]:
+    """web=True (live pages): stricter about what counts as a threat, because real sites hide a lot of
+    harmless UI text. Threat needs an instruction pattern, a stronger model (Gemma), invisible-Unicode
+    smuggling, or a hidden email/link/phone outside menus, tabs and dialogs. The fast model alone,
+    amounts alone, and facts inside collapsible UI or HTML comments raise a caution instead."""
     seen_facts = facts(visible)
     out = []
     for s in spans:
@@ -92,8 +101,23 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True) ->
         long_hidden = long_passage_caution and len(s.text.split()) >= 25
         unsure = [n for n, v in votes.items() if getattr(v, "unsure", False)]
         is_comment = any("comment" in r.lower() for r in s.reasons)
-        if why:
+        if web and any("collapsed UI" in r for r in s.reasons) and not flagged and not new:
+            unsure = []   # menus, tabs and dialogs: a "maybe" from a model isn't worth a warning
+        strong = bool(why)
+        if web and why:
+            ui = any("collapsed UI" in r for r in s.reasons)
+            strong_votes = [n for n in flagged if n not in FAST_MODELS]
+            strong_facts = {k: v for k, v in new.items() if k != "amount"} if not (ui or is_comment) else {}
+            unicode = any("Unicode tag payload" in r for r in s.reasons)
+            strong = bool(strong_votes or strong_facts or unicode)
+        ui_facts_only = web and why and not flagged and any("collapsed UI" in r for r in s.reasons) \
+            and not any("Unicode tag payload" in r for r in s.reasons)
+        if why and strong:
             level = "threat"
+        elif ui_facts_only:
+            level = "info"      # a phone number or price inside a closed menu/tab is normal UI
+        elif why:
+            level = "caution"
         elif (unsure or long_hidden) and not is_comment:
             level = "caution"
             why.append(f"might be instructing an AI ({', '.join(unsure)})" if unsure
