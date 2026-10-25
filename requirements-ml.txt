@@ -1,0 +1,14 @@
+# Only for retraining (ml/). The shipped model needs nothing extra.
+scikit-learn
+pandas
+pyyaml
+# GPU fine-tuning (ml/train_transformer.py)
+torch
+transformers
+datasets
+accelerate
+sentencepiece
+tokenizers
+peft
+# BrowseSafe++ loader (not on PyPI yet)
+browsesafe-pp[eval] @ git+https://github.com/perplexityai/browsesafe-plus-plus.git

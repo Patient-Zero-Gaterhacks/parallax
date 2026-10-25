@@ -1,0 +1,11 @@
+google-genai>=2.33
+beautifulsoup4
+pymupdf>=1.26
+numpy
+httpx
+fastapi
+uvicorn
+python-docx
+lxml
+python-multipart
+mcp>=2.3
