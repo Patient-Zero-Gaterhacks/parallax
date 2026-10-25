@@ -295,7 +295,8 @@
     const cw = doc.createTreeWalker(doc.body, 128 /* SHOW_COMMENT */);
     for (let n = cw.nextNode(); n; n = cw.nextNode()) {
       const t = n.nodeValue.trim();
-      if (t.length > 20 && !skipComment(t)) hidden.push({ text: t, reasons: ["HTML comment"], el: null });
+      // anchor: the comment itself, so Show on page can put its label where the comment sits
+      if (t.length > 20 && !skipComment(t)) hidden.push({ text: t, reasons: ["HTML comment"], el: null, anchor: n });
     }
     for (const t of doc.querySelectorAll("template")) {        // never rendered, but in the HTML agents read
       const txt = (t.content ? t.content.textContent : t.textContent || "").replace(/\s+/g, " ").trim();

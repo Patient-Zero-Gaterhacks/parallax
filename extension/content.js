@@ -93,7 +93,7 @@
     const upgrade = key === applied.key && applied.quick && !quick;
     if (ver < applied.ver && !upgrade) return;
     applied = { ver: Math.max(ver, applied.ver), key, quick };
-    findings.forEach((f, i) => { f.el = spans[i] && spans[i].el; });
+    findings.forEach((f, i) => { f.el = spans[i] && spans[i].el; f.anchor = spans[i] && spans[i].anchor; });
     const threats = findings.filter(f => f.level === "threat");
     const cautions = findings.filter(f => f.level === "caution");
     lastGroups = merge(threats.concat(cautions));
@@ -218,7 +218,7 @@
       const last = out[out.length - 1];
       if (last && f.el && last.els.includes(f.el) && last.level === f.level && how(last.where) === how(f.where)) {
         last.text += " " + f.text; if (!last.els.includes(f.el)) last.els.push(f.el); last.why = [...new Set(last.why.concat(f.why || []))];
-      } else out.push({ text: f.text, where: f.where, why: f.why || [], level: f.level, els: f.els || [f.el] });
+      } else out.push({ text: f.text, where: f.where, why: f.why || [], level: f.level, els: f.els || [f.el], anchor: f.anchor });
     }
     return out;
   }
@@ -331,7 +331,8 @@
       btns.append(reveal);
     }
     const ignore = document.createElement("button"); ignore.className = "px-btn px-ghost"; ignore.textContent = "Ignore";
-    ignore.onclick = () => { dismissedKey = d.key; removePanel(); };
+    // put the page back first: otherwise the highlights stay with no button to hide them, and scanning stays off
+    ignore.onclick = () => { dismissedKey = d.key; hideAll(); removePanel(); rescan(); };
     btns.append(ignore);
     card.append(btns);
     root.append(card);
@@ -396,14 +397,23 @@
             if (fix.length) { save(a); fix.forEach(([k, v]) => a.style.setProperty(k, v, "important")); }
           }
         }
+        // invisible Unicode "tag" characters stay invisible even when highlighted: spell them out next to the text
+        const tags = (g.where || []).includes("Unicode tag payload") && D.tagPayload(els[0].textContent);
+        if (tags) {
+          const label = document.createElement("span"); label.className = "parallax-label";
+          label.textContent = "Invisible characters spell out: " + (tags.length > 300 ? tags.slice(0, 300) + "…" : tags);
+          els[els.length - 1].after(label); revealed.added.push(label);
+        }
         first = first || els[0];
         continue;
       }
       // Nothing to show: label it next to its element if that spot is visible, otherwise in the box at the top.
       const label = document.createElement("span"); label.className = "parallax-label"; label.textContent = labelText(g);
-      const el = els[0], spot = el && !el.closest("head") && el.parentElement;
+      // an HTML comment has no element: label it right where the comment sits (a Comment node has no .closest())
+      const el = els[0], anchor = g.anchor && g.anchor.isConnected ? g.anchor : null;
+      const spot = anchor ? anchor.parentElement : el && !el.closest("head") && el.parentElement;
       if (spot && spot.checkVisibility && spot.checkVisibility({ visibilityProperty: true, opacityProperty: true })) {
-        el.after(label); revealed.added.push(label);
+        (anchor || el).after(label); revealed.added.push(label);
       } else {
         if (!box) {
           box = document.createElement("div"); box.className = "parallax-label-box";
