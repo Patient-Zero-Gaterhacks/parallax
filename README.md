@@ -29,11 +29,13 @@ parallax/
 │   ├── scan.py          # One scanner for every file type
 │   ├── detect.py        # Decides if hidden text is talking to an AI
 │   └── server.py        # API, demo and attack lab
+├── frontend/            # Web app (React + Vite), empty for now
 ├── extension/           # Chrome extension
 ├── ml/                  # Training and testing the model
 ├── eval/                # Evaluation scripts
 ├── tests/               # Tests
 ├── scripts/get_data.sh  # Downloads the public datasets
+├── .env.example         # Settings and API keys (copy to .env)
 ├── requirements.txt     # What you need to run Parallax
 └── requirements-ml.txt  # Extra packages, only for retraining the model
 ```
@@ -43,14 +45,14 @@ parallax/
 - Python 3.10 or newer
 - Git
 - Google Chrome (for the extension)
-- Node.js (only for the extension tests)
+- Node.js 18 or newer (for the frontend and the extension tests)
 
 ## Setup
 
 1. Clone the repo:
 
    ```bash
-   git clone https://github.com/YOUR-ORG/parallax.git
+   git clone https://github.com/Patient-Zero-Gaterhacks/parallax.git
    cd parallax
    ```
 
@@ -65,13 +67,18 @@ parallax/
 
    ```bash
    pip install -r requirements.txt
-   playwright install chromium      # optional: full web-page scanning
    ```
 
-4. (Optional) Add a Gemini API key to turn on the Gemma 4 check:
+4. Make your `.env` file and add any keys you have (all optional, e.g. a Gemini API key turns on the Gemma 4 check):
 
    ```bash
-   export GEMINI_API_KEY=your-key-here
+   cp .env.example .env
+   ```
+
+   Load it into your terminal before running the server:
+
+   ```bash
+   set -a; source .env; set +a      # Windows: set each variable with $env:NAME="value"
    ```
 
 ## Run it
@@ -84,6 +91,16 @@ uvicorn parallax.server:app --port 8787
 
 - Demo: http://localhost:8787/demo
 - Attack lab: http://localhost:8787/lab
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open http://localhost:5173.
 
 ### Chrome extension
 
