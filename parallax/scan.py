@@ -29,7 +29,7 @@ from pathlib import Path
 from .detect import default_detectors
 from .gap.cloak import check_url
 from .gap.docx_gap import analyze_docx
-from .gap.html_gap import analyze_html
+from .gap.html_gap import MARKUP, analyze_html
 from .gap.pdf_gap import analyze_pdf
 
 FACT_PATTERNS = {
@@ -83,7 +83,10 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
     """web=True (live pages): stricter about what counts as a threat, because real sites hide a lot of
     harmless UI text. Threat needs an instruction pattern, a stronger model (Gemma), invisible-Unicode
     smuggling, or a hidden email/link/phone outside menus, tabs and dialogs. The fast model alone,
-    amounts alone, and facts inside collapsible UI or HTML comments raise a caution instead."""
+    amounts alone, and facts inside collapsible UI or HTML comments raise a caution instead.
+    Markup text (alt/title/aria/data-* attributes, hidden fields, meta tags, JSON-LD) is red only when a
+    detector other than the fast model flags it; links/phones/prices there alone are info. A link whose
+    text shows one site but goes to another is red in emails and files, a caution on live pages."""
     seen_facts = facts(visible)
     first = [d for d in detectors if not getattr(d, "second_pass", False)]
     second = [d for d in detectors if getattr(d, "second_pass", False)]
@@ -109,20 +112,35 @@ def _judge(spans, visible: str, detectors, long_passage_caution: bool = True, we
             why.append(f"adds a hidden {k}: {', '.join(sorted(v))}")
         if unicode:
             why.append("text smuggled in invisible Unicode")
-        long_hidden = long_passage_caution and len(s.text.split()) >= 25
+        markup = any(r.startswith(MARKUP) for r in s.reasons)   # alt/aria/data-*/JSON-LD/meta/link text
+        mismatch = markup and any("link text shows" in r for r in s.reasons)
+        if mismatch:
+            why.append("link text shows one site but goes to another")
+        long_hidden = long_passage_caution and len(s.text.split()) >= 25 and not markup
         unsure = [n for n, v in votes.items() if getattr(v, "unsure", False) and n not in cleared]
         is_comment = any("comment" in r.lower() for r in s.reasons)
         if web and any("collapsed UI" in r for r in s.reasons) and not flagged and not new:
             unsure = []   # menus, tabs and dialogs: a "maybe" from a model isn't worth a warning
+        if web and markup and not flagged:
+            unsure = []   # pages are full of alt text and structured data; only a real flag counts
         strong = bool(why)
+        if markup and not mismatch and not unicode and not [n for n in flagged if n not in FAST_MODELS]:
+            strong = False   # links/phones/prices or a fast-model guess in alt text or JSON-LD: never red alone
+        markup_label = markup and not mismatch and not unicode and len(s.text.split()) < 12 \
+            and flagged and all(n in FAST_MODELS for n in flagged)   # "Learn more about the assistant"
         if web and why:
             ui = any("collapsed UI" in r for r in s.reasons)
             strong_votes = [n for n in flagged if n not in FAST_MODELS]
             strong_facts = {k: v for k, v in new.items() if k != "amount"} if not (ui or is_comment) else {}
-            unicode = any("Unicode tag payload" in r for r in s.reasons)
+            if markup and not mismatch:
+                strong_facts = {}
             strong = bool(strong_votes or strong_facts or unicode)
+            if mismatch and not (strong_votes or unicode):
+                strong = False   # on live pages a lookalike link is a caution (redirect/tracking links are common)
         ui_facts_only = web and why and not flagged and any("collapsed UI" in r for r in s.reasons) \
-            and not any("Unicode tag payload" in r for r in s.reasons)
+            and not unicode
+        ui_facts_only = ui_facts_only or (markup and not mismatch and why and not flagged and not unicode) \
+            or (web and markup_label)
         if why and strong:
             level = "threat"
         elif ui_facts_only:

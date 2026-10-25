@@ -22,13 +22,18 @@
       const m = ml && ml[i];
       const ui = s.reasons.some(r => r.startsWith("collapsed UI"));
       const comment = s.reasons.includes("HTML comment");
+      // markup = alt/title/aria/data-* text, hidden fields, meta tags, JSON-LD: facts there alone are normal
+      const markup = s.reasons.some(r => r.startsWith("markup:"));
+      const mismatch = s.reasons.some(r => r.startsWith("markup: link text shows"));
       const newFacts = (s.text.match(FACT) || []).filter(f => !visible.includes(f));
       const strong = [], weak = [];
       if (LOCAL.test(s.text)) strong.push("talks to an AI (offline check)");
       if (s.reasons.includes("Unicode tag payload")) strong.push("text smuggled in invisible Unicode");
-      if (newFacts.length && !ui && !comment) strong.push("adds hidden " + newFacts.slice(0, 3).join(", "));
-      if (m && m.level === "sure") weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
-      else if (m && m.level === "maybe" && !ui) weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
+      if (newFacts.length && !ui && !comment && !markup) strong.push("adds hidden " + newFacts.slice(0, 3).join(", "));
+      if (mismatch) weak.push("link text shows one site but goes to another");
+      const label = markup && !mismatch && s.text.split(/\s+/).length < 12;   // short button/tooltip labels
+      if (m && m.level === "sure" && !label) weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
+      else if (m && m.level === "maybe" && !ui && !markup) weak.push(`might be instructing an AI (parallax-ml ${m.score.toFixed(2)})`);
       if (strong.length) return { text: s.text, where: s.reasons, level: "threat", why: strong.concat(weak) };
       if (weak.length) return { text: s.text, where: s.reasons, level: "caution", why: weak };
       return { text: s.text, where: s.reasons, level: "info", why: [] };
