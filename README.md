@@ -121,6 +121,22 @@ Then open http://localhost:5173.
 
 3. Keep the server running so you can approve paused actions at `http://localhost:8787/approve/<id>`.
 
+## Optional detectors (environment variables)
+
+`GET /health` lists the detectors that are on. `patterns` and `parallax-ml` are always on.
+
+| Variable | Turns on | Notes |
+| --- | --- | --- |
+| `PARALLAX_ML_TRANSFORMER` | `gemma-finetuned`, our fine-tuned Gemma 3 1B | A model folder, or a Hugging Face repo id such as `brandenxo/parallax-gemma` (downloaded once into the Hugging Face cache). Set `HF_TOKEN` if the repo is private. Needs `torch` and `transformers` (`requirements-ml.txt`). |
+| `PARALLAX_ZERO_SHOT_GEMMA=1` and `GEMINI_API_KEY` | `gemma-4`, untrained Gemma 4 31B | Both are needed. A Gemini key alone does not turn it on. |
+| `PARALLAX_PROMPT_GUARD=1` | `prompt-guard-2` | Accept Meta's license on Hugging Face first. |
+| `CONTENT_SAFETY_ENDPOINT` and `CONTENT_SAFETY_KEY` | `azure-prompt-shields` | |
+
+```bash
+export HF_TOKEN=...                        # only for a private repo; never commit it
+PARALLAX_ML_TRANSFORMER=brandenxo/parallax-gemma uvicorn parallax.server:app --port 8787
+```
+
 ## Tests
 
 ```bash

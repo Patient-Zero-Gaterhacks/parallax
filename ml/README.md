@@ -72,7 +72,9 @@ model like `microsoft/deberta-v3-small` on everything above. Extra data:
     Prompt Guard 2 scores only F1 0.35 on it, which is why we train our own.
   * Microsoft LLMail-Inject, full: 208k human-written attacks (sampled).
 
-Turn it on with `PARALLAX_ML_TRANSFORMER=models/parallax-transformer`. `--smoke`
+Turn it on with `PARALLAX_ML_TRANSFORMER=models/parallax-transformer`, or point it at a Hugging Face
+repo id (`PARALLAX_ML_TRANSFORMER=<user>/parallax-gemma`, plus `HF_TOKEN` if private). Gemma models show up
+in `/health` as `gemma-finetuned`. `--smoke`
 runs the whole pipeline on CPU with a tiny from-scratch model to check the code
 works (its scores mean nothing).
 

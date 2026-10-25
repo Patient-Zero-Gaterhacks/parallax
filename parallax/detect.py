@@ -9,8 +9,11 @@ Always on:
   parallax-ml                 -> our trained classifier (ml/train_fast.py), pure Python;
                                  turn off with PARALLAX_ML=0
 Turned on by environment variables:
-  PARALLAX_ML_TRANSFORMER=dir -> our fine-tuned transformer (ml/train_transformer.py)
-  GEMINI_API_KEY              -> Gemma 4 zero-shot
+  PARALLAX_ML_TRANSFORMER=dir -> our fine-tuned Gemma (ml/train_transformer.py); a folder, or a
+                                 Hugging Face repo id like user/parallax-gemma (downloaded once;
+                                 set HF_TOKEN if the repo is private). Shows up as "gemma-finetuned".
+  PARALLAX_ZERO_SHOT_GEMMA=1  -> Gemma 4 31B zero-shot, untrained, with GEMINI_API_KEY (both needed;
+                                 the key alone does not turn it on)
   PARALLAX_PROMPT_GUARD=1     -> Meta Llama Prompt Guard 2 (accept its license on Hugging Face first)
   CONTENT_SAFETY_ENDPOINT/KEY -> Azure Prompt Shields
 """
@@ -149,14 +152,38 @@ def page_chunks(text: str) -> list[str]:
     return [text[k:k + CHUNK_CHARS] for k in range(0, max(1, len(text)), CHUNK_CHARS)][:MAX_CHUNKS] or [""]
 
 
+MODEL_FILES = ["config.json", "model.safetensors", "model.safetensors.index.json", "model-*.safetensors",
+               "tokenizer*", "special_tokens_map.json", "added_tokens.json", "generation_config.json",
+               "parallax_head.pt", "parallax_report.json"]
+REPO_ID = re.compile(r"^[\w.-]+/[\w.-]+$")
+
+
+def resolve_model(path: str) -> str:
+    """A folder on disk, or a Hugging Face repo id (user/name) fetched into the local cache.
+    A folder that exists always wins. A private repo needs HF_TOKEN."""
+    if Path(path).exists():
+        return path
+    if not REPO_ID.match(path):
+        raise FileNotFoundError(f"PARALLAX_ML_TRANSFORMER={path!r} is not a folder or a Hugging Face repo id")
+    from huggingface_hub import snapshot_download
+    try:
+        return snapshot_download(path, allow_patterns=MODEL_FILES, token=os.environ.get("HF_TOKEN") or None)
+    except Exception as e:
+        raise RuntimeError(
+            f"could not download {path!r} from Hugging Face ({type(e).__name__}); "
+            "if the repo is private, set HF_TOKEN to a token that can read it") from e
+
+
 class TransformerDetector:
-    """A fine-tuned model from ml/train_transformer.py (e.g. Gemma). Runs on CPU or GPU."""
+    """A fine-tuned model from ml/train_transformer.py (e.g. Gemma). Runs on CPU or GPU.
+    `path` is a model folder or a Hugging Face repo id."""
     name = "parallax-transformer"
     SURE, MAYBE = 0.85, 0.5
 
     def __init__(self, path: str):
         import torch
         from transformers import AutoTokenizer
+        path = resolve_model(path)
         self.torch = torch
         self.dev = "cuda" if torch.cuda.is_available() else "cpu"
         self.tok = AutoTokenizer.from_pretrained(path)
@@ -168,12 +195,19 @@ class TransformerDetector:
         else:
             from transformers import AutoModelForSequenceClassification
             self.model = AutoModelForSequenceClassification.from_pretrained(path).to(self.dev).eval()
+        if self._is_gemma(Path(path)):
+            self.name = "gemma-finetuned"
+
+    @staticmethod
+    def _is_gemma(folder: Path) -> bool:
         try:
-            rep = json.loads((Path(path) / "parallax_report.json").read_text())
-            if "gemma" in str(rep.get("base", "")).lower():
-                self.name = "gemma-finetuned"
+            return "gemma" in str(json.loads((folder / "parallax_report.json").read_text()).get("base", "")).lower()
         except (OSError, ValueError):
             pass
+        try:
+            return "gemma" in str(json.loads((folder / "config.json").read_text()).get("model_type", "")).lower()
+        except (OSError, ValueError):
+            return False
 
     def score(self, text: str) -> float:
         parts = page_chunks(text)
@@ -196,7 +230,9 @@ def default_detectors() -> list:
         dets.append(MLDetector())
     if os.environ.get("PARALLAX_ML_TRANSFORMER"):
         dets.append(TransformerDetector(os.environ["PARALLAX_ML_TRANSFORMER"]))
-    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+    # the untrained 31B is opt-in: a Gemini key alone must not switch it on
+    if os.environ.get("PARALLAX_ZERO_SHOT_GEMMA") == "1" and (
+            os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
         dets.append(GemmaDetector())
     if os.environ.get("PARALLAX_PROMPT_GUARD") == "1":
         dets.append(PromptGuardDetector())

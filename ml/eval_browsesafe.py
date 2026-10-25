@@ -3,8 +3,8 @@
     python3 -I ml/eval_browsesafe.py                     # full Parallax scanner on the HTML pages
     python3 -I ml/eval_browsesafe.py --source ./folder   # use a local copy instead of downloading
     python3 -I ml/eval_browsesafe.py --n-pairs 2000      # quicker run on part of the data
-    PARALLAX_ML_TRANSFORMER=models/parallax-gemma python3 -I ml/eval_browsesafe.py   # with fine-tuned Gemma
-    GEMINI_API_KEY=...  python3 -I ml/eval_browsesafe.py --n-pairs 300               # with zero-shot Gemma
+    PARALLAX_ML_TRANSFORMER=<user>/parallax-gemma python3 -I ml/eval_browsesafe.py   # fine-tuned Gemma (folder or HF repo id)
+    GEMINI_API_KEY=... PARALLAX_ZERO_SHOT_GEMMA=1 python3 -I ml/eval_browsesafe.py --n-pairs 300   # zero-shot Gemma 4
 
 Each pair = an attacked page + the same page with the attack removed. A good
 detector flags the first and not the second. Results are split by where the
