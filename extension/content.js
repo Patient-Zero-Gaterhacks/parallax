@@ -10,6 +10,7 @@
     rect: el => el.getBoundingClientRect(),
     get viewport() { return { width: innerWidth, height: innerHeight }; },
     get page() { return { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight }; },
+    get scroll() { return { x: scrollX, y: scrollY }; },
     topAt: (x, y) => document.elementFromPoint(x, y),
   };
 
@@ -48,7 +49,8 @@
 
   let lastSpans = [];
   let dismissedKey = null;   // findings the user dismissed; don't show them again
-  const keyOf = (threats, cautions) => threats.concat(cautions).map(f => f.text).join("\n");
+  // sorted, so the same findings in a different order count as the same
+  const keyOf = (threats, cautions) => threats.concat(cautions).map(f => f.text).sort().join("\n");
 
   // Per-site pause, like an ad blocker's "off on this site" switch (set from the popup).
   const isPaused = async () => {
@@ -63,15 +65,16 @@
   let started = 0;                                     // version of the newest scan
   let applied = { ver: 0, key: null, quick: false };   // what's on screen now
   let serverJob = null, nextJob = null;                // the call in flight, and the one latest call after it
-  let sentKey = null, sentFindings = null;             // last hidden spans the server judged, and its answer
+  let sentKey = null, sentFindings = null;             // last hidden spans the server judged, and its answer (by span)
   let failed = { key: null, at: 0 };                   // don't re-ask about spans the server just failed on
   let lastUrl = location.href, lastMessage = null;
   const RETRY_MS = 60000;
 
-  // Same hidden spans -> same key (FNV-1a over texts + reasons).
+  // Same hidden spans, in any order -> same key (FNV-1a over texts + reasons).
+  const spanId = x => JSON.stringify([x.text, x.reasons]);
   function spansKey(spans) {
     let h = 0x811c9dc5;
-    const s = JSON.stringify(spans.map(x => [x.text, x.reasons]));
+    const s = spans.map(spanId).sort().join("\n");
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
     return (h >>> 0).toString(36) + ":" + spans.length;
   }
@@ -109,7 +112,7 @@
       try { res = await chrome.runtime.sendMessage({ type: "classify", payload: job.payload }); } catch (e) { /* worker gone */ }
       serverJob = null;
       if (res && res.findings) {
-        sentKey = job.key; sentFindings = res.findings;
+        sentKey = job.key; sentFindings = new Map(job.payload.spans.map((s, i) => [spanId(s), res.findings[i]]));
         apply(job.ver, job.key, res.findings.map(f => ({ ...f })), job.spans, false);
       } else {
         failed = { key: job.key, at: Date.now() };
@@ -133,7 +136,7 @@
       document.querySelectorAll(".parallax-reveal").forEach(el => el.classList.remove("parallax-reveal"));
       applied = { ver, key: null, quick: false };   // answers to earlier scans can't overwrite the pause
       lastVerdict = { verdict: "paused" }; lastGroups = []; lastKey = null;
-      const root = document.getElementById("parallax-panel"); root && root.remove();
+      removePanel();
       chrome.runtime.sendMessage(lastMessage = { type: "verdict", verdict: "paused", count: 0, hidden: 0, items: [] });
       return;
     }
@@ -158,7 +161,7 @@
                       visible: known.slice(0, 40000), context: "web" };
     const key = spansKey(payload.spans);
     if (key === sentKey) {   // hidden text unchanged (only visible text moved): reuse the server's answer
-      apply(ver, key, sentFindings.map(f => ({ ...f })), spans, false);
+      apply(ver, key, payload.spans.map(s => ({ ...sentFindings.get(spanId(s)) })), spans, false);   // matched by span: order may differ
       return;
     }
     if (key !== applied.key) {   // new hidden text: show the quick offline verdict right away
@@ -181,9 +184,9 @@
     const w = (where || []).join(" ");
     if (/text color ~ background|transparent text/.test(w)) return "same color as the background";
     if (/font-size/.test(w)) return "tiny text";
-    if (/off-screen/.test(w)) return "pushed off the screen";
+    if (/off-screen/.test(w)) return "moved off the page";
     if (/opacity/.test(w)) return "see-through text";
-    if (/clipped|zero-size/.test(w)) return "squeezed to nothing";
+    if (/clipped|zero-size/.test(w)) return "shrunk to nothing";
     if (/covered by another/.test(w)) return "covered by something else";
     if (/Unicode/.test(w)) return "invisible characters";
     if (/HTML comment|markup:/.test(w)) return "inside the page code";
@@ -207,29 +210,50 @@
   let lastVerdict = null;   // what the popup shows, so the badge, popup and page always agree
   let lastGroups = [];
   let lastKey = null;       // don't redraw (or re-animate) when a rescan finds the same thing
+  let cardOpen = false;     // an open card stays open (redrawn in place) when a new result arrives
+  let hovering = false, pendingRender = null;   // while the mouse is on the panel, keep the latest result for later
+  let shrunkKey = null;     // messages whose pill already shrank: redraws of them start small
   // our fine-tuned Gemma reports as "parallax-transformer"; the untrained one as "gemma-4"
   const byGemma = g => (g.why || []).some(w => /^talks to an AI \([^)]*(gemma|parallax-transformer)/i.test(w));
+
+  function removePanel() {
+    const root = document.getElementById("parallax-panel"); root && root.remove();
+    lastKey = null; cardOpen = false; hovering = false; pendingRender = null;
+  }
 
   // Quiet by default. A real threat shows a small pill in the corner that shrinks to a dot;
   // clicking it opens a short card. Anything less serious only changes the toolbar badge.
   function render(threats, cautions, opts = {}) {
+    // Don't change the panel under the mouse (the card would close mid-click); apply the latest result on leave.
+    if (hovering && !opts.force) { pendingRender = [threats, cautions, opts]; return; }
+    pendingRender = null;
     let root = document.getElementById("parallax-panel");
     const show = threats.length || (opts.force && cautions.length);
-    if (!show) { root && root.remove(); lastKey = null; return; }
+    if (!show) { removePanel(); return; }
     // Include levels and reasons: when the server's answer replaces the quick offline verdict for the same
     // hidden text, the card must redraw (otherwise it keeps "offline check" and never shows "Confirmed by Gemma").
-    const key = keyOf(threats, cautions) + (opts.title || "") +
-      JSON.stringify(threats.concat(cautions).map(f => [f.level, f.why || []]));
+    // Sorted, so the same messages in a different order don't redraw.
+    const key = threats.concat(cautions).map(f => JSON.stringify([f.text, f.level, f.why || []])).sort().join("\n") +
+      (opts.title || "");
     if (root && key === lastKey && !opts.force) return;
     lastKey = key;
     const groups = merge(threats.concat(cautions));
-    if (!root) { root = document.createElement("div"); root.id = "parallax-panel"; document.documentElement.appendChild(root); }
+    if (!root) {
+      root = document.createElement("div"); root.id = "parallax-panel"; document.documentElement.appendChild(root);
+      root.addEventListener("pointerenter", () => { hovering = true; });
+      root.addEventListener("pointerleave", () => {
+        hovering = false;
+        const next = pendingRender; pendingRender = null;
+        if (next) render(...next);
+      });
+    }
     root.className = threats.length ? "px-threat" : "px-caution";
     const data = { groups, isThreat: !!threats.length, title: opts.title, key: keyOf(threats, cautions) };
-    opts.force ? openCard(root, data) : openPill(root, data);
+    opts.force || cardOpen ? openCard(root, data) : openPill(root, data);
   }
 
   function openPill(root, d) {
+    cardOpen = false;
     const n = d.groups.filter(g => g.level === "threat").length || d.groups.length;
     root.innerHTML = "";
     const pill = document.createElement("button"); pill.className = "px-pill";
@@ -239,11 +263,14 @@
     pill.querySelector(".px-pill-text").textContent = n > 1 ? "hidden messages" : "hidden message";
     pill.onclick = () => openCard(root, d);
     root.append(pill);
-    setTimeout(() => pill.classList.add("px-small"), 6000);   // shrink to just the dot and number
+    // shrink to just the dot and number; a redraw of the same messages starts small instead of animating again
+    if (shrunkKey === d.key) pill.classList.add("px-small");
+    else setTimeout(() => { pill.classList.add("px-small"); shrunkKey = d.key; }, 6000);
   }
 
   function openCard(root, d) {
     const n = d.groups.filter(g => g.level === "threat").length || d.groups.length;
+    cardOpen = true;
     root.innerHTML = "";
     const card = document.createElement("div"); card.className = "px-card";
 
@@ -280,13 +307,20 @@
     const btns = document.createElement("div"); btns.className = "px-btns";
     const els = d.groups.flatMap(g => g.els).filter(Boolean);
     if (els.length) {
-      const reveal = document.createElement("button"); reveal.className = "px-btn"; reveal.textContent = "Show on page";
+      const reveal = document.createElement("button"); reveal.className = "px-btn";
+      reveal.textContent = els[0].classList.contains("parallax-reveal") ? "Hide again" : "Show on page";   // survives redraws
       reveal.onclick = () => { const on = !els[0].classList.contains("parallax-reveal");
-        els.forEach(el => el.classList.toggle("parallax-reveal", on)); reveal.textContent = on ? "Hide again" : "Show on page"; };
+        els.forEach(el => el.classList.toggle("parallax-reveal", on)); reveal.textContent = on ? "Hide again" : "Show on page";
+        if (on) {   // revealed text sits in place now (even if it was moved off the page): take the user there
+          els[0].scrollIntoView({ behavior: "smooth", block: "center" });
+          els[0].classList.remove("parallax-flash"); void els[0].offsetWidth;   // restart the flash if clicked again
+          els[0].classList.add("parallax-flash");
+          setTimeout(() => els[0].classList.remove("parallax-flash"), 1200);
+        } };
       btns.append(reveal);
     }
     const ignore = document.createElement("button"); ignore.className = "px-btn px-ghost"; ignore.textContent = "Ignore";
-    ignore.onclick = () => { dismissedKey = d.key; root.remove(); lastKey = null; };
+    ignore.onclick = () => { dismissedKey = d.key; removePanel(); };
     btns.append(ignore);
     card.append(btns);
     root.append(card);

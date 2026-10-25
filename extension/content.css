@@ -7,7 +7,7 @@
   animation: parallax-in .35s ease-out both;
 }
 @keyframes parallax-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { #parallax-panel, #parallax-panel * { animation: none !important; transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { #parallax-panel, #parallax-panel *, .parallax-flash { animation: none !important; transition: none !important; } }
 #parallax-panel * { box-sizing: border-box; font-family: inherit; }
 #parallax-panel button:focus-visible { outline: 2px solid #808080; outline-offset: 2px; }
 
@@ -24,6 +24,7 @@
 #parallax-panel .px-pill-text { max-width: 140px; overflow: hidden; white-space: nowrap; transition: max-width .4s ease, opacity .3s ease; }
 #parallax-panel .px-pill.px-small { padding: 8px 12px; }
 #parallax-panel .px-pill.px-small .px-pill-text { max-width: 0; opacity: 0; }
+#parallax-panel .px-pill.px-small .px-dot { animation: none; }   /* no pulse again when the same pill is redrawn */
 
 /* Card */
 #parallax-panel .px-card { width: 300px; max-width: calc(100vw - 40px); padding: 14px 16px 16px; border-radius: 10px;
@@ -64,3 +65,7 @@
 #parallax-panel .px-list { margin-top: 10px; max-height: 260px; overflow-y: auto; }
 #parallax-panel .px-item + .px-item { margin-top: 12px; }
 #parallax-panel .px-list .px-quote { margin-top: 0; }
+
+/* "Show on page" flash: a short pulse around the revealed text so the eye finds it. */
+.parallax-flash { animation: parallax-flash 1s ease-out; }
+@keyframes parallax-flash { 0%, 50% { box-shadow: 0 0 0 0 rgba(180, 35, 24, .7); } 100% { box-shadow: 0 0 0 12px rgba(180, 35, 24, 0); } }

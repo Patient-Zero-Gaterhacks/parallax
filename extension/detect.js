@@ -99,7 +99,7 @@
   }
 
   // env: { style(el) -> CSSStyleDeclaration-like, rect(el) -> {left,top,width,height},
-  //        viewport: {width,height}, page: {width,height}, topAt(x,y) -> element|null }
+  //        viewport: {width,height}, page: {width,height}, scroll: {x,y} (optional), topAt(x,y) -> element|null }
   function assess(textNode, env) {
     const reasons = [];
     const el = textNode.parentElement;
@@ -145,8 +145,11 @@
       if (c < 1.5) reasons.push(`text color ~ background (${c.toFixed(2)}:1)`);
     }
     const r = env.rect(el);
-    if (r && (r.left + r.width < 0 || r.top + r.height < 0 || r.left > env.page.width + 50 ||
-              r.left > env.viewport.width + 5000)) reasons.push("positioned off-screen");   // right:-9999px widens the page itself
+    // rect() is relative to the current view: add the scroll so text above a scrolled-down view isn't "off-screen"
+    const scroll = env.scroll || { x: 0, y: 0 };
+    const left = r && r.left + scroll.x, top = r && r.top + scroll.y;
+    if (r && (left + r.width < 0 || top + r.height < 0 || left > env.page.width + 50 ||
+              left > env.viewport.width + 5000)) reasons.push("positioned off-screen");   // right:-9999px widens the page itself
     if (r && env.topAt && r.width > 0 && r.height > 0 &&
         r.left >= 0 && r.top >= 0 && r.left + r.width <= env.viewport.width && r.top + r.height <= env.viewport.height) {
       const top = env.topAt(r.left + r.width / 2, r.top + r.height / 2);
