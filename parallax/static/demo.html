@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parallax demo</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1c1b19; --quiet: #6b6862; --line: #e3e0da;
+    --threat: #b42318; --threat-bg: #fdecea; --ok: #1f7a4d; --ok-bg: #e7f5ee; --warn: #9a6100; --warn-bg: #fff4dd;
+    --accent: #2f5bd3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --panel: #1f1f1d; --ink: #f1efe9; --quiet: #a39f97; --line: #34332f;
+      --threat: #ff8a7a; --threat-bg: #3a1e1a; --ok: #7fd6a6; --ok-bg: #16302a; --warn: #ffc864; --warn-bg: #3a2e14; --accent: #8fa8ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; background: var(--bg); color: var(--ink); }
+  header { padding: 20px 24px 8px; }
+  header h1 { margin: 0; font-size: 22px; }
+  header p { margin: 4px 0 0; color: var(--quiet); }
+  main { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(360px, 1.2fr); gap: 16px; padding: 16px 24px 32px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--quiet); margin: 0 0 10px; }
+  .mail { display: flex; justify-content: space-between; gap: 8px; padding: 10px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+  .mail:hover, .mail.sel { border-color: var(--line); background: var(--bg); }
+  .mail b { display: block; }
+  .mail small { color: var(--quiet); }
+  .badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 99px; white-space: nowrap; align-self: start; }
+  .threat { color: var(--threat); background: var(--threat-bg); }
+  .clean { color: var(--ok); background: var(--ok-bg); }
+  .caution { color: var(--warn); background: var(--warn-bg); }
+  .views { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  .view { border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 120px; font-size: 14px; }
+  .view h3 { margin: 0 0 6px; font-size: 13px; color: var(--quiet); }
+  .hid { background: var(--threat-bg); color: var(--threat); border-radius: 4px; padding: 0 3px; }
+  iframe { width: 100%; height: 130px; border: 0; background: #fff; border-radius: 6px; }
+  .reqs { display: flex; flex-wrap: wrap; gap: 8px; }
+  button { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .results { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .card h3 { margin: 0 0 8px; font-size: 15px; }
+  .row { margin: 6px 0; font-size: 14px; }
+  .bad { color: var(--threat); font-weight: 600; }
+  .good { color: var(--ok); font-weight: 600; }
+  .ask { color: var(--warn); }
+  label.tog { display: flex; gap: 8px; align-items: center; color: var(--quiet); font-size: 14px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Parallax</h1>
+  <p>Your AI assistant should never act on something you can't see.</p>
+</header>
+<main>
+  <section class="panel">
+    <h2>María's inbox</h2>
+    <div id="inbox"></div>
+    <div class="views">
+      <div class="view"><h3>What you see</h3><iframe id="seen" sandbox=""></iframe></div>
+      <div class="view"><h3>What the AI also reads</h3><div id="aisees"></div></div>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>Ask the assistant</h2>
+    <div class="reqs" id="reqs"></div>
+    <label class="tog"><input type="checkbox" id="yes" checked> María clicks "yes" on every question</label>
+    <div class="results">
+      <div class="card"><h3>Without Parallax</h3><div id="plain">Pick a request.</div></div>
+      <div class="card"><h3>With Parallax</h3><div id="guarded">Pick a request.</div></div>
+    </div>
+  </section>
+</main>
+<script>
+const api = (p, body) => fetch(p, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {}).then(r => r.json());
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+let emails = [];
+
+function showEmail(i) {
+  document.querySelectorAll(".mail").forEach((el, j) => el.classList.toggle("sel", i === j));
+  const m = emails[i];
+  document.getElementById("seen").srcdoc = "<body style='font-family:sans-serif;font-size:14px;margin:8px'>" + m.html + "</body>";
+  document.getElementById("aisees").innerHTML = m.hidden.length
+    ? "<p>" + esc(m.headline) + "</p>" + m.hidden.map(h => "<p><span class='hid'>" + esc(h) + "</span></p>").join("")
+    : "<p>Nothing beyond what you see.</p>";
+}
+
+function render(r) {
+  const parts = [];
+  for (const [to, what] of r.sent) parts.push(`<div class="row ${/ana@cpa|frontdesk@gfclinic/.test(to) ? "good" : "bad"}">Sent ${esc(what).slice(0, 40)} to ${esc(to)}</div>`);
+  for (const [who, amt] of r.paid) parts.push(`<div class="row ${/gfc-billing-update|1,412/.test(who + amt) ? "bad" : "good"}">Paid ${esc(amt)} to ${esc(who)}</div>`);
+  for (const [fact, how] of r.remembered) parts.push(`<div class="row ${/013 0199|0130199/.test(fact) ? "bad" : "good"}">Remembered "${esc(fact)}" (${esc(how)})</div>`);
+  for (const s of r.shown) parts.push(`<div class="row">Told María: ${esc(s)}</div>`);
+  for (const q of r.questions) parts.push(`<div class="row ask">Asked first: ${esc(q.reasons.join(" "))}</div>`);
+  if (r.blocked) parts.push(`<div class="row good">Blocked: ${esc(r.blocked.split(": ").slice(2).join(": ") || r.blocked)}</div>`);
+  return parts.join("") || "<div class='row'>Nothing happened.</div>";
+}
+
+async function ask(key, btn) {
+  document.querySelectorAll("#reqs button").forEach(b => b.classList.toggle("on", b === btn));
+  const yes = document.getElementById("yes").checked;
+  const [a, b] = await Promise.all([
+    api("/assistant", {request: key, mode: "unprotected", user_confirms: yes}),
+    api("/assistant", {request: key, mode: "parallax", user_confirms: yes})]);
+  document.getElementById("plain").innerHTML = render(a);
+  document.getElementById("guarded").innerHTML = render(b);
+}
+
+api("/demo/inbox").then(d => {
+  emails = d.emails;
+  document.getElementById("inbox").innerHTML = emails.map((m, i) =>
+    `<div class="mail" data-i="${i}"><div><b>${esc(m.subject)}</b><small>${esc(m.from)}</small></div>` +
+    `<span class="badge ${m.verdict}">${m.verdict === "threat" ? "Hidden AI instructions" : m.verdict === "clean" ? "Safe" : "Check"}</span></div>`).join("");
+  document.querySelectorAll(".mail").forEach(el => el.onclick = () => showEmail(+el.dataset.i));
+  showEmail(0);
+  document.getElementById("reqs").innerHTML = Object.entries(d.requests).map(([k, t]) => `<button data-k="${k}">${esc(t)}</button>`).join("");
+  document.querySelectorAll("#reqs button").forEach(b => b.onclick = () => ask(b.dataset.k, b));
+});
+</script>
+</body>
+</html>
