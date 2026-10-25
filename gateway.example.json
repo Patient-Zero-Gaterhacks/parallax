@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "mail": {"command": "python", "args": ["-m", "parallax.mcp_gateway.demo_mail_server"],
+             "env": {"DEMO_POISON": "0"}}
+  },
+  "sinks": [],
+  "readonly": [],
+  "allow": []
+}
