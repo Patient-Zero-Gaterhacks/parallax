@@ -97,6 +97,8 @@
     lastMessage = { type: "verdict", ...lastVerdict,
                     items: threats.concat(cautions).map(f => ({ text: f.text.slice(0, 300), why: f.why, where: f.where })) };
     chrome.runtime.sendMessage(lastMessage);
+    playgroundFindings = threats.concat(cautions).map(f => ({ text: f.text, level: f.level, where: f.where, why: f.why }));
+    tellPlayground();
     if (keyOf(threats, cautions) === dismissedKey) return;
     render(threats, cautions);
   }
@@ -132,12 +134,14 @@
     }
     const paused = await isPaused();
     if (ver !== started) return;
+    document.documentElement.dataset.parallax = paused ? "paused" : "on";
     if (paused) {
       document.querySelectorAll(".parallax-reveal").forEach(el => el.classList.remove("parallax-reveal"));
       applied = { ver, key: null, quick: false };   // answers to earlier scans can't overwrite the pause
       lastVerdict = { verdict: "paused" }; lastGroups = []; lastKey = null;
       removePanel();
       chrome.runtime.sendMessage(lastMessage = { type: "verdict", verdict: "paused", count: 0, hidden: 0, items: [] });
+      tellPlayground();
       return;
     }
     styleCache = new WeakMap();
@@ -370,6 +374,25 @@
   const soon = () => later(200);
   addEventListener("hashchange", soon);
   addEventListener("popstate", soon);
+  // ---- "Am I protected?" playground --------------------------------------
+  // Every page can see Parallax is running (<html data-parallax="on|paused">), nothing more. Only a page with
+  // <meta name="parallax-playground" content="1"> (our #try page) also gets the verdict and its findings.
+  let playgroundFindings = [];
+  const isPlayground = () => !!document.querySelector('meta[name="parallax-playground"][content="1"]');
+  const toPage = msg => { try { window.postMessage({ source: "parallax-extension", ...msg }, location.origin); } catch (e) { /* opaque origin */ } };
+  function tellPlayground() {
+    if (!isPlayground() || !lastVerdict) return;
+    toPage({ type: "verdict", verdict: lastVerdict.verdict, quick: lastVerdict.quick || false, gemma: !!lastVerdict.gemma,
+             findings: lastVerdict.verdict === "paused" ? [] : playgroundFindings });
+  }
+  addEventListener("message", async e => {
+    if (e.source !== window || !e.data || e.data.source !== "parallax-page" || e.data.type !== "ping" || !isPlayground()) return;
+    let server = null;
+    try { server = await chrome.runtime.sendMessage({ type: "serverUrl" }); } catch (err) { /* worker gone */ }
+    toPage({ type: "pong", version: chrome.runtime.getManifest().version, server, paused: await isPaused() });
+    tellPlayground();   // the page may have started listening after the last verdict
+  });
+
   // Back/Forward can restore this page from cache: tell the badge again what this page has.
   addEventListener("pageshow", e => { if (e.persisted && lastMessage) chrome.runtime.sendMessage(lastMessage); });
   scan();

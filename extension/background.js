@@ -24,6 +24,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     });
     return true; // async reply
   }
+  if (msg.type === "serverUrl") {   // for the playground page's status banner
+    ParallaxServer.url().then(reply).catch(() => reply(null));
+    return true;
+  }
   if (msg.type === "ml") {   // the built-in model only, for the quick verdict shown before the server answers
     model().then(m => reply(msg.spans.map(s => ParallaxML.judge(m, s.text)))).catch(() => reply(null));
     return true;

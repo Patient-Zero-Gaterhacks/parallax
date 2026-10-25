@@ -13,6 +13,9 @@ export default function Nav() {
         <a href="#how" className="py-2.5 hover:text-neutral-300 max-sm:hidden">
           How it works
         </a>
+        <a href="#try" className="py-2.5 hover:text-neutral-300">
+          Try it
+        </a>
         <a
           href="#get"
           className="inline-flex min-h-11 items-center rounded-md bg-white px-[18px] font-medium text-black transition-colors hover:bg-neutral-300"

@@ -32,6 +32,12 @@ export default function Hero() {
           >
             Get the plugin
           </a>
+          <a
+            href="#try"
+            className="inline-flex min-h-12 items-center rounded-md border border-safe px-6 text-[15px] font-medium text-safe transition-colors hover:bg-safe hover:text-black"
+          >
+            Try it live
+          </a>
         </div>
       </div>
 

@@ -29,6 +29,7 @@ Parallax compares what a person sees with what the AI reads, judges whether the 
 
 ## Try it
 
+- **Am I protected? playground:** https://z6tfp4t9fcdojg-8787.proxy.runpod.net/#try — checks whether the extension is protecting your browser, hides real attacks for AI nine different ways and shows each one caught live, plus a no-install file and URL scanner
 - **Website:** https://z6tfp4t9fcdojg-8787.proxy.runpod.net — what Parallax does, with the "same email, two readings" demo
 - **Demo inbox:** https://z6tfp4t9fcdojg-8787.proxy.runpod.net/demo — the same requests to an assistant, with and without Parallax
 - **Attack lab:** https://z6tfp4t9fcdojg-8787.proxy.runpod.net/lab — pages and files with hidden attacks

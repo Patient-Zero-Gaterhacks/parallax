@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import Home from "./pages/Home";
 import ComingSoon from "./pages/ComingSoon";
+import Try from "./pages/Try";
 
 // Simple page switching with the part of the URL after "#".
-// "#extension" and "#plugin" open their own pages; anything else shows the home page
+// "#extension", "#plugin" and "#try" (the "Am I protected?" playground) open their own pages; anything else shows the home page
 // (and "#problem", "#how", "#get" scroll to that section).
-type Page = "home" | "extension" | "plugin";
+type Page = "home" | "extension" | "plugin" | "try";
 
 function pageFromUrl(): Page {
   const hash = window.location.hash.slice(1);
-  return hash === "extension" || hash === "plugin" ? hash : "home";
+  return hash === "extension" || hash === "plugin" || hash === "try" ? hash : "home";
 }
 
 export default function App() {
@@ -30,6 +31,9 @@ export default function App() {
 
   if (page === "extension") {
     return <ComingSoon label="Browser extension" title="Get the extension" />;
+  }
+  if (page === "try") {
+    return <Try />;
   }
   if (page === "plugin") {
     return <ComingSoon label="MCP plugin" title="Get the plugin" />;
