@@ -10,6 +10,8 @@
 When the fine-tuned Gemma is loaded, file and URL scans also have it read the VISIBLE text, cut up as in
 ml/official_test.py page mode (up to 8 chunks, flagged if any chunk >= 0.85), so the measured numbers apply:
 a document can be written to steer an AI in plain sight. Never on /classify (live pages in the extension).
+Off unless PARALLAX_VISIBLE_CHECK=1: on 243 ordinary saved pages it raised 9 false cautions (contact lines
+like "Email us at ...", menus), so it isn't on by default yet.
 
 Verdicts:
     threat   hidden text that talks to an AI, adds facts you can't see
@@ -234,6 +236,8 @@ def _visible_pass(visible: str, detectors) -> tuple[list[Finding], float | None]
     VISIBLE_MAX_CHUNKS), its sentences are scored and the top 1-2 become findings: a caution when only
     the model says so, a threat when the patterns flag that sentence too. Only second-pass detectors that
     score chunks (TransformerDetector) take part; the zero-shot API models were never measured this way."""
+    if os.environ.get("PARALLAX_VISIBLE_CHECK") != "1":
+        return [], None
     models = [d for d in detectors if getattr(d, "second_pass", False) and hasattr(d, "scores")]
     if not models or not visible.strip():
         return [], None

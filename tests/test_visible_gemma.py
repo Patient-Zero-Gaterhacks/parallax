@@ -4,6 +4,7 @@ Its flagged sentences become a caution, or a threat when the patterns flag the s
 off without a second-pass detector, is never used by /classify, and a model error changes nothing.
 Uses a stub detector: no models, no network.
 """
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -14,6 +15,8 @@ import docx  # noqa: E402
 import pymupdf  # noqa: E402
 from parallax.detect import CHUNK_CHARS, PatternDetector, Vote  # noqa: E402
 from parallax.scan import VISIBLE_WHERE, scan_docx, scan_html, scan_pdf  # noqa: E402
+
+os.environ.pop("PARALLAX_VISIBLE_CHECK", None)
 
 ok = []
 
@@ -54,6 +57,13 @@ check("the hard sentence trips the patterns, the soft one doesn't",
 def page(*paras):
     return "<html><body>" + "".join(f"<p>{x}</p>" for x in paras) + "</body></html>"
 
+
+# off by default: even a flagging model adds nothing until PARALLAX_VISIBLE_CHECK=1
+g = StubGemma()
+r = scan_html(page(FILLER * 3, SOFT, FILLER), [PatternDetector(), g])
+check("off by default -> model never asked, no finding", not g.batches and not visible_findings(r)
+      and r.visible_check_seconds is None, f"{r.verdict} batches={len(g.batches)}")
+os.environ["PARALLAX_VISIBLE_CHECK"] = "1"
 
 # stub flags, patterns silent -> caution
 g = StubGemma()
